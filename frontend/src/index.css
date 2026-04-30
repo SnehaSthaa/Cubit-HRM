@@ -1,0 +1,189 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 240 5% 96%;
+    --foreground: 240 20% 10%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 240 20% 10%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 20% 10%;
+
+    --primary: 258 58% 52%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 240 12% 95%;
+    --secondary-foreground: 240 12% 40%;
+
+    --muted: 240 12% 95%;
+    --muted-foreground: 240 8% 46%;
+
+    --accent: 25 95% 53%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 240 10% 90%;
+    --input: 240 10% 90%;
+    --ring: 258 58% 52%;
+
+    --radius: 0.75rem;
+
+    --success: 152 69% 40%;
+    --success-foreground: 152 69% 97%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 38 92% 10%;
+
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 240 8% 46%;
+    --sidebar-primary: 258 58% 52%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 12% 95%;
+    --sidebar-accent-foreground: 240 20% 10%;
+    --sidebar-border: 240 10% 92%;
+    --sidebar-ring: 258 58% 52%;
+
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+
+  .dark {
+    --background: 240 15% 8%;
+    --foreground: 220 20% 96%;
+
+    --card: 240 14% 12%;
+    --card-foreground: 220 20% 96%;
+
+    --popover: 240 14% 14%;
+    --popover-foreground: 220 20% 96%;
+
+    --primary: 258 58% 58%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 240 12% 16%;
+    --secondary-foreground: 220 12% 75%;
+
+    --muted: 240 12% 18%;
+    --muted-foreground: 220 10% 55%;
+
+    --accent: 25 95% 55%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 220 20% 98%;
+
+    --border: 240 12% 16%;
+    --input: 240 12% 18%;
+    --ring: 258 58% 58%;
+
+    --success: 152 69% 45%;
+    --success-foreground: 152 69% 95%;
+    --warning: 38 92% 55%;
+    --warning-foreground: 38 92% 10%;
+
+    --sidebar-background: 240 15% 9%;
+    --sidebar-foreground: 220 10% 55%;
+    --sidebar-primary: 258 58% 58%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 12% 16%;
+    --sidebar-accent-foreground: 220 20% 90%;
+    --sidebar-border: 240 12% 13%;
+    --sidebar-ring: 258 58% 58%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    transition: background-color 0.3s ease, color 0.3s ease;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    letter-spacing: -0.025em;
+    @apply tracking-tight font-semibold;
+  }
+}
+
+@layer components {
+  .font-mono-data {
+    font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .status-pill {
+    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium border;
+  }
+
+  .status-active {
+    background: hsl(var(--success) / 0.1);
+    color: hsl(var(--success));
+    border-color: hsl(var(--success) / 0.2);
+  }
+
+  .status-pending {
+    background: hsl(var(--warning) / 0.1);
+    color: hsl(var(--warning));
+    border-color: hsl(var(--warning) / 0.2);
+  }
+
+  .status-inactive {
+    background: hsl(var(--muted-foreground) / 0.1);
+    color: hsl(var(--muted-foreground));
+    border-color: hsl(var(--muted-foreground) / 0.15);
+  }
+
+  .status-resigned {
+    background: hsl(var(--destructive) / 0.08);
+    color: hsl(var(--destructive));
+    border-color: hsl(var(--destructive) / 0.2);
+  }
+
+  .status-notice {
+    background: hsl(var(--accent) / 0.1);
+    color: hsl(var(--accent));
+    border-color: hsl(var(--accent) / 0.2);
+  }
+
+  .nexus-table {
+    @apply w-full text-sm;
+  }
+
+  .nexus-table th {
+    @apply text-left text-muted-foreground font-medium text-[11px] uppercase tracking-wider px-4 py-3 border-b bg-muted/30;
+  }
+
+  .nexus-table td {
+    @apply px-4 py-3 border-b border-border/50;
+    height: 44px;
+  }
+
+  .nexus-table tr {
+    @apply transition-colors;
+  }
+
+  .nexus-table tbody tr:hover td {
+    @apply bg-accent/10;
+  }
+
+  .press-effect {
+    transition: transform 150ms cubic-bezier(0.2, 0, 0, 1);
+  }
+
+  .press-effect:active {
+    transform: scale(0.97);
+  }
+
+  .glass-card {
+    @apply bg-card/80 backdrop-blur-sm border border-border rounded-xl shadow-sm;
+  }
+}

@@ -1,0 +1,26 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Reproduce Backend Employee Create Error",
+			"type": "shell",
+			"command": "cd \"c:\\Users\\User\\Downloads\\harmony-hr-main\\Final UIUX\\backend\" && node -v && node --check tmp_repro_employee.js",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Reproduce Backend Employee Create Error",
+			"type": "shell",
+			"command": "cd \"c:\\Users\\User\\Downloads\\harmony-hr-main\\Final UIUX\\backend\"; node -v; node --check tmp_repro_employee.js",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Reproduce Backend Employee Create Error",
+			"type": "shell",
+			"command": "powershell -NoProfile -Command \"Set-Location 'C:\\Users\\User\\Downloads\\harmony-hr-main\\Final UIUX\\backend'; node -v; node --check tmp_repro_employee.js\"",
+			"isBackground": false,
+			"problemMatcher": []
+		}
+	]
+}

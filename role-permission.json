@@ -1,0 +1,14 @@
+{
+  "superadmin": {
+    "dashboard": {
+      "view": true,
+      "create": true
+    }
+  },
+  "employee": {
+    "dashboard": {
+      "view": true,
+      "create": false
+    }
+  }
+}

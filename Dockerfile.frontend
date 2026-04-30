@@ -1,0 +1,27 @@
+FROM node:18-alpine
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+COPY tsconfig*.json ./
+COPY vite.config.ts ./
+COPY index.html ./
+COPY tailwind.config.ts ./
+COPY postcss.config.js ./
+
+# Install dependencies
+RUN npm ci
+
+# Copy source code
+COPY src ./src
+COPY public ./public
+
+# Copy .env
+COPY .env .env 2>/dev/null || true
+
+# Expose port
+EXPOSE 5173
+
+# Development server with HMR
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
