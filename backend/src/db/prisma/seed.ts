@@ -10,138 +10,141 @@ const prisma = new PrismaClient({ adapter: new PrismaPg(pool) });
 async function main() {
   console.log("🌱 Seeding database...");
 
-  // =====================
-  // USERS
-  // =====================
-  const adminPassword = await bcrypt.hash("admin123", 10);
-  const admin = await prisma.user.upsert({
-    where: { email: "admin@harmonyhr.com" },
-    update: {},
-    create: {
-      email: "admin@harmonyhr.com",
-      password_hash: adminPassword,
-      name: "System Admin",
-      role: "super_admin",
-    },
-  });
+  const saltRounds = 10;
+  const commonPassword = await bcrypt.hash("password123", saltRounds);
 
-  const hrUser = await prisma.user.upsert({
-    where: { email: "hr@harmonyhr.com" },
-    update: {},
-    create: {
-      email: "hr@harmonyhr.com",
-      password_hash: await bcrypt.hash("hr123", 10),
-      name: "HR Admin",
-      role: "hr_admin",
-    },
-  });
-  await prisma.employee.upsert({
-    where: { email: "admin@harmonyhr.com" },
-    update: {},
-    create: {
-      user_id: admin.id,
-      employee_id: "EMP-ADMIN-001",
-      first_name: "System",
-      last_name: "Admin",
-      email: "admin@harmonyhr.com",
-      department: "Management",
-      joining_date: new Date(),
-      employment_status: "Active",
-      employment_type: "Full-time",
-    },
-  });
-
-  await prisma.employee.upsert({
-    where: { email: "hr@harmonyhr.com" },
-    update: {},
-    create: {
-      user_id: hrUser.id,
-      employee_id: "EMP-HR-001",
-      first_name: "HR",
-      last_name: "Admin",
-      email: "hr@harmonyhr.com",
-      department: "Human Resources",
-      joining_date: new Date(),
-      employment_status: "Active",
-      employment_type: "Full-time",
-    },
-  });
-
-  const empPassword = await bcrypt.hash("emp123", 10);
-  const employeeUser = await prisma.user.upsert({
-    where: { email: "john@harmonyhr.com" },
-    update: {},
-    create: {
-      email: "john@harmonyhr.com",
-      password_hash: empPassword,
-      name: "John Doe",
-      role: "employee",
-    },
-  });
-
-  // =====================
-  // EMPLOYEE
-  // =====================
-  const employee = await prisma.employee.upsert({
-    where: { user_id: employeeUser.id },
-    update: {},
-    create: {
-      user_id: employeeUser.id,
-      employee_id: "EMP001",
-      first_name: "John",
-      last_name: "Doe",
-      email: "john@harmonyhr.com",
-      department: "Engineering",
-      joining_date: new Date("2024-01-15"),
-    },
-  });
-
-  // =====================
-  // LEAVE POLICY (IMPORTANT)
-  // =====================
-  const leavePolicy = await prisma.leavePolicy.upsert({
+  // 1. LEAVE POLICIES
+  const annualPolicy = await prisma.leavePolicy.upsert({
     where: { type: "annual" },
     update: {},
     create: {
       name: "Annual Leave",
       type: "annual",
       annual_quota: 20,
+      carry_forward: true,
     },
   });
 
-  // =====================
-  // ATTENDANCE
-  // =====================
-  await prisma.attendance.createMany({
-    data: [
-      {
-        employee_id: employee.id,
-        date: new Date("2024-04-01"),
-        status: "present",
+  // 2. ADMIN USER & EMPLOYEE PROFILE
+  const admin = await prisma.user.upsert({
+    where: { email: "admin@harmonyhr.com" },
+    update: {},
+    create: {
+      email: "admin@harmonyhr.com",
+      password_hash: commonPassword,
+      name: "System Admin",
+      role: "super_admin",
+      employee: {
+        create: {
+          employee_id: "EMP-001",
+          employee_verified: true,
+          department: {
+            create: {
+              department_name: "Management",
+              joining_date: new Date(),
+              designation: "CTO",
+            },
+          },
+          personal_details: {
+            create: {
+              first_name: "System",
+              last_name: "Admin",
+              email: "admin@harmonyhr.com",
+              phone: "9800000000",
+            },
+          },
+        },
       },
-      {
-        employee_id: employee.id,
-        date: new Date("2024-04-02"),
-        status: "present",
-      },
-    ],
-    skipDuplicates: true,
+    },
+    include: { employee: true },
   });
 
-  // =====================
-  // LEAVE (FIXED)
-  // =====================
-  await prisma.leave.create({
-    data: {
-      employee_id: employee.id,
-      start_date: new Date("2024-05-01"),
-      end_date: new Date("2024-05-03"),
-      leave_type_id: leavePolicy.id,
-      days_count: 3,
-      reason: "Family vacation",
-      status: "approved",
+  // 3. REGULAR EMPLOYEE
+  const johnUser = await prisma.user.upsert({
+    where: { email: "john@harmonyhr.com" },
+    update: {},
+    create: {
+      email: "john@harmonyhr.com",
+      password_hash: commonPassword,
+      name: "John Doe",
+      role: "employee",
+      employee: {
+        create: {
+          employee_id: "EMP-002",
+          department: {
+            create: [
+              {
+                department_name: "Engineering",
+                joining_date: new Date(),
+                designation: "Senior Developer",
+              },
+            ],
+          },
+          personal_details: {
+            create: {
+              first_name: "John",
+              last_name: "Doe",
+              email: "john@personal.com",
+              phone: "9812345678",
+            },
+          },
+        },
+      },
     },
+    include: { employee: true },
   });
+
+  const johnId = johnUser.employee?.id;
+
+  if (johnId) {
+    await prisma.attendance.upsert({
+      where: {
+        employee_id_date: {
+          employee_id: johnId,
+          date: new Date("2024-05-01"),
+        },
+      },
+      update: {},
+      create: {
+        employee_id: johnId,
+        date: new Date("2024-05-01"),
+        status: "present",
+      },
+    });
+
+    // 5. LEAVE BALANCE (John)
+    await prisma.leaveBalance.upsert({
+      where: {
+        employee_id_year_leave_type_id: {
+          employee_id: johnId,
+          year: 2026,
+          leave_type_id: annualPolicy.id,
+        },
+      },
+      update: {},
+      create: {
+        employee_id: johnId,
+        year: 2026,
+        leave_type_id: annualPolicy.id,
+        total: 20,
+        remaining: 17,
+        used: 3,
+      },
+    });
+
+    // 6. LEAVE REQUEST (John)
+    await prisma.leave.create({
+      data: {
+        employee_id: johnId,
+        start_date: new Date("2024-05-10"),
+        end_date: new Date("2024-05-13"),
+        leave_type_id: annualPolicy.id,
+        days_count: 3,
+        reason: "Family vacation",
+        status: "approved",
+      },
+    });
+  }
 
   console.log("✅ Seed completed successfully!");
 }
