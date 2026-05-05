@@ -14,7 +14,7 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:reset": "prisma migrate reset",
-    "db:seed": "tsx prisma/seed.ts",
+    "seed": "ts-node src/db/prisma/seed.ts",
     "db:studio": "prisma studio"
   },
   "dependencies": {
@@ -44,15 +44,16 @@
     "@types/jsonwebtoken": "^9.0.7",
     "@types/morgan": "^1.9.9",
     "@types/multer": "^2.1.0",
-    "@types/node": "^20.10.6",
+    "@types/node": "^20.19.39",
     "@types/nodemailer": "^8.0.0",
     "@types/pg": "^8.20.0",
     "@types/swagger-jsdoc": "^6.0.4",
     "@types/swagger-ui-express": "^4.1.8",
     "nodemon": "^3.1.14",
     "prisma": "^7.7.0",
+    "ts-node": "^10.9.2",
     "tsx": "^4.7.0",
-    "typescript": "^5.3.3",
+    "typescript": "^5.9.3",
     "vitest": "^4.1.4"
   }
 }
