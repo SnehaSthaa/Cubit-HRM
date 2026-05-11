@@ -14,6 +14,7 @@ import {
   Moon,
   ChevronDown,
   DollarSign,
+  Image,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme } from "./ThemeProvider";
@@ -96,6 +97,7 @@ const employeeNav = [
       { to: "/attendance", icon: Clock, label: "My Attendance" },
       { to: "/leave", icon: CalendarDays, label: "Leave" },
       { to: "/payroll", icon: DollarSign, label: "My Payslips" },
+      { to: "/assets", icon: Package, label: "My Assets" },
     ],
   },
 ];

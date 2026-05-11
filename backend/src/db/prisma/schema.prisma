@@ -7,18 +7,18 @@ datasource db {
 }
 
 model User {
-  id            String @id @default(uuid()) @db.Uuid
-  email         String @unique
+  id            String    @id @default(uuid()) @db.Uuid
+  email         String    @unique
   password_hash String
-
-  name       String
-  phone      String?
-  role       UserRole
-  is_active  Boolean   @default(true)
-  created_at DateTime  @default(now())
-  updated_at DateTime  @updatedAt
-  employee   Employee?
-  reports    Report[]
+  name          String
+  phone         String?
+  role          UserRole
+  is_active     Boolean   @default(true)
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @updatedAt
+  employee      Employee?
+  reports       Report[]
+  assets        Asset[]
 
   @@map("users")
 }
@@ -168,34 +168,61 @@ model Asset {
   id            String      @id @default(uuid()) @db.Uuid
   asset_id      String      @unique
   name          String
+  status        AssetStatus @default(available)
   category      String
   serial_number String?     @unique
   purchase_cost Decimal?    @db.Decimal(12, 2)
   purchase_date DateTime?   @db.Date
-  status        AssetStatus @default(available)
-  assigned_to   String?     @db.Uuid
   assigned_date DateTime?   @db.Date
   location      String?
   notes         String?
-  created_at    DateTime    @default(now())
-  updated_at    DateTime    @updatedAt
+  reason        String?
   return_date   DateTime?   @db.Date
-  employee      Employee?   @relation("AssetAssignee", fields: [assigned_to], references: [id])
+  reveiwed_at   DateTime?
+
+  assigned_to         String? @db.Uuid
+  reviewed_by_user_id String? @db.Uuid
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  employee              Employee?            @relation("AssetAssignee", fields: [assigned_to], references: [id])
+  reviewer              User?                @relation(fields: [reviewed_by_user_id], references: [id], onDelete: NoAction)
+  assets_takehome_dates AssetsTakeHomeDate[]
 
   @@map("assets")
 }
 
+model AssetsTakeHomeDate {
+  id         String         @id @default(uuid()) @db.Uuid
+  status     TakeHomeStatus @default(pending)
+  end_date   DateTime?      @db.Date
+  start_date DateTime?      @db.Date
+  reason     String?
+  asset_id   String         @db.Uuid
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  asset Asset @relation(fields: [asset_id], references: [id], onDelete: Cascade)
+
+  @@map("assets_takehome_dates")
+}
+
 model Report {
-  id           String     @id @default(uuid()) @db.Uuid
-  generated_by String     @db.Uuid
-  name         String
-  type         ReportType
-  from_date    DateTime?  @db.Date
-  to_date      DateTime?  @db.Date
-  filters      Json?
-  data         Json?
-  created_at   DateTime   @default(now())
-  user         User       @relation(fields: [generated_by], references: [id])
+  id        String     @id @default(uuid()) @db.Uuid
+  name      String
+  type      ReportType
+  from_date DateTime?  @db.Date
+  to_date   DateTime?  @db.Date
+  filters   Json?
+  data      Json?
+
+  generated_by String @db.Uuid
+
+  created_at DateTime @default(now())
+
+  user User @relation(fields: [generated_by], references: [id])
 
   @@map("reports")
 }
@@ -265,6 +292,12 @@ enum AttendanceStatus {
 }
 
 enum LeaveStatus {
+  pending
+  approved
+  rejected
+}
+
+enum TakeHomeStatus {
   pending
   approved
   rejected

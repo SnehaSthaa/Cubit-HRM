@@ -7,12 +7,25 @@ import {
   UserPlus,
   ArrowUpRight,
   Calendar as CalendarIcon,
+  CakeIcon,
 } from "lucide-react";
 import { Calendar } from "@/components/ui/calendar";
 import { useRole } from "@/contexts/RoleContext";
 import { useToast } from "@/hooks/use-toast";
 import { apiClient } from "@/services/apiClient";
 import type { Employee } from "@/types";
+import { Dialog, DialogContent, DialogTitle } from "@radix-ui/react-dialog";
+import { DialogHeader } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+import { Button } from "@/components/ui/button";
+import { LeaveApiResponse, LeaveRequest } from "./LeaveManagement";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectValue,
+} from "@/components/ui/select";
+import { SelectTrigger } from "@radix-ui/react-select";
 
 const container = {
   hidden: { opacity: 0 },
@@ -27,7 +40,26 @@ const item = {
     transition: { duration: 0.35, ease: [0.25, 0.1, 0, 1] },
   },
 };
+const months = [
+  { label: "All", value: "all" },
+  { label: "Jan", value: 0 },
+  { label: "Feb", value: 1 },
+  { label: "Mar", value: 2 },
+  { label: "Apr", value: 3 },
+  { label: "May", value: 4 },
+  { label: "Jun", value: 5 },
+  { label: "Jul", value: 6 },
+  { label: "Aug", value: 7 },
+  { label: "Sep", value: 8 },
+  { label: "Oct", value: 9 },
+  { label: "Nov", value: 10 },
+  { label: "Dec", value: 11 },
+];
 
+type EmployeeWithBirthday = Employee & {
+  nextBirthday: Date;
+  daysLeft: number;
+};
 const leaveStatusClass: Record<string, string> = {
   "Paid Leave": "status-active",
   "Sick Leave": "status-pending",
@@ -47,7 +79,18 @@ const enumToLeaveType: Record<string, string> = {
   paid: "Paid Leave",
   compensatory: "Compensatory Leave",
 };
-
+const normaliseStatus = (s?: string) => {
+  if (!s) return "Pending";
+  const map: Record<string, string> = {
+    pending: "Pending",
+    approved: "Approved",
+    rejected: "Rejected",
+    Pending: "Pending",
+    Approved: "Approved",
+    Rejected: "Rejected",
+  };
+  return map[s] ?? s;
+};
 interface StatItem {
   label: string;
   value: number;
@@ -92,7 +135,13 @@ export default function Dashboard() {
   const [calendarDate, setCalendarDate] = useState<Date | undefined>(
     new Date(),
   );
-
+  const [birthdays, setBirthdays] = useState<EmployeeWithBirthday[]>([]);
+  const [selectedMonth, setSelectedMonth] = useState<string>("all");
+  const [selectedRequest, setSelectedRequest] = useState<LeaveRequest | null>(
+    null,
+  );
+  const [rejectDialog, setRejectDialog] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
   const [stats, setStats] = useState<StatItem[]>([
     {
       label: "Active Employees",
@@ -129,6 +178,18 @@ export default function Dashboard() {
   const [activeEmployeesList, setActiveEmployeesList] = useState<Employee[]>(
     [],
   );
+  const [currentEmployeeId, setCurrentEmployeeId] = useState<string | null>(
+    null,
+  );
+
+  useEffect(() => {
+    if (!isHR) {
+      apiClient.getMe().then((res) => {
+        setCurrentEmployeeId(res.data?.employee?.id ?? null);
+      });
+    }
+  }, [isHR]);
+  const [requests, setRequests] = useState<LeaveRequest[]>([]);
   const [pendingOffboardingList, setPendingOffboardingList] = useState<
     Employee[]
   >([]);
@@ -148,7 +209,52 @@ export default function Dashboard() {
     }[]
   >([]);
   const [loading, setLoading] = useState(true);
+  const fetchLeaves = async () => {
+    try {
+      let data: LeaveApiResponse[] = [];
 
+      if (isHR) {
+        // HR fetches all leaves
+        const res = await apiClient.getLeaves();
+        data = Array.isArray(res.data) ? res.data : [];
+      } else {
+        if (!currentEmployeeId) return;
+        const res = await apiClient.getLeavesByEmployee(currentEmployeeId);
+        data = Array.isArray(res.data) ? res.data : [];
+      }
+
+      const mapped: LeaveRequest[] = data.map((l: LeaveApiResponse) => {
+        const empName =
+          typeof l.employee === "object"
+            ? ((l.employee as { user?: { name?: string }; name?: string })?.user
+                ?.name ??
+              (l.employee as { user?: { name?: string }; name?: string })?.name)
+            : (l.employee ?? l.employee_name ?? "Unknown");
+        const policyName =
+          typeof l.leaveType === "object"
+            ? (l.leaveType?.name ?? "Unknown Leave")
+            : (l.leaveType ?? "Unknown Leave");
+        return {
+          id: l.id ?? "",
+          employee: empName,
+          type: policyName,
+          from: l.start_date?.split("T")[0] ?? "",
+          to: l.end_date?.split("T")[0] ?? "",
+          days: l.days_count ?? l.days ?? 1,
+          status: normaliseStatus(l.status),
+          reason: l.reason ?? "",
+          appliedOn: l.created_at?.split("T")[0] ?? "",
+          approvedBy: l.approved_by ?? l.approvedBy,
+          remarks: l.remarks,
+          rejectionReason:
+            l.rejection_reason ?? l.approval_notes ?? l.rejectionReason,
+        };
+      });
+      setRequests(mapped);
+    } catch (err) {
+      console.error("Failed to fetch leaves", err);
+    }
+  };
   const fetchDashboardData = async () => {
     try {
       setLoading(true);
@@ -260,9 +366,49 @@ export default function Dashboard() {
       setLoading(false);
     }
   };
+  const fetchBirthdays = async () => {
+    try {
+      const res = await apiClient.getEmployees();
+      const employees = res.data ?? [];
+      const today = new Date();
+      const upcomming = employees
+        .filter((e) => e.date_of_birth)
+        .map((e) => {
+          const dob = new Date(e.date_of_birth);
+          const nextBirthday = new Date(
+            today.getFullYear(),
+            dob.getMonth(),
+            dob.getDate(),
+          );
+          if (nextBirthday < today) {
+            nextBirthday.setFullYear(today.getFullYear() + 1);
+          }
+          return {
+            ...e,
+            nextBirthday,
+            daysLeft: Math.ceil(
+              (nextBirthday.getTime() - today.getTime()) /
+                (1000 * 60 * 60 * 24),
+            ),
+          };
+        })
+        .sort((a, b) => a.daysLeft - b.daysLeft)
+        .slice(0, 5);
+      setBirthdays(upcomming);
+    } catch (err) {
+      console.log(err);
+    }
+  };
+  const filteredBirthdays = birthdays.filter((emp) => {
+    if (selectedMonth === "all") return true;
+
+    const dob = new Date(emp.date_of_birth!);
+    return dob.getMonth() === Number(selectedMonth);
+  });
 
   useEffect(() => {
     fetchDashboardData();
+    fetchBirthdays();
     const interval = setInterval(fetchDashboardData, 10000);
     return () => clearInterval(interval);
   }, []);
@@ -298,21 +444,24 @@ export default function Dashboard() {
     }
   };
 
-  const handleReject = async (id: string) => {
-    if (!id) {
-      toast({ title: "Invalid leave ID", variant: "destructive" });
-      return;
-    }
+  const handleReject = async () => {
+    if (!rejectReason.trim() || !selectedRequest) return;
 
     try {
-      await apiClient.rejectLeave(id, "Rejected from dashboard");
+      await apiClient.rejectLeave(selectedRequest.id, rejectReason);
+
       await fetchDashboardData();
+      await fetchLeaves();
+
+      setRejectDialog(false);
+      setRejectReason("");
+      setSelectedRequest(null);
+
       toast({ title: "Leave rejected" });
     } catch (err) {
       toast({
-        title: "Rejection failed",
-        description: err instanceof Error ? err.message : "Error",
-        variant: "destructive",
+        title: "Error",
+        description: "Failed to reject leave.",
       });
     }
   };
@@ -474,15 +623,23 @@ export default function Dashboard() {
                           month: "short",
                         })}
                       </span>
-                      <span className="text-[10px] text-muted-foreground">
-                        {new Date(h.start_date).toLocaleDateString("en", {
-                          day: "numeric",
-                        })}
-                        {" - "}
-                        {new Date(h.end_date).toLocaleDateString("en", {
-                          day: "numeric",
-                        })}
-                      </span>
+                      {h.start_date === h.end_date ? (
+                        <span className="text-[10px] text-muted-foreground">
+                          {new Date(h.start_date).toLocaleDateString("en", {
+                            day: "numeric",
+                          })}
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-muted-foreground">
+                          {new Date(h.start_date).toLocaleDateString("en", {
+                            day: "numeric",
+                          })}
+                          {" - "}
+                          {new Date(h.end_date).toLocaleDateString("en", {
+                            day: "numeric",
+                          })}
+                        </span>
+                      )}
                     </div>
                     <div>
                       <p className="text-sm font-medium">{h.name}</p>
@@ -541,7 +698,23 @@ export default function Dashboard() {
                           Approve
                         </button>
                         <button
-                          onClick={() => handleReject(action.id)}
+                          onClick={() => {
+                            setSelectedRequest({
+                              id: action.id,
+                              employee: action.name,
+                              type: action.type,
+                              from: "",
+                              to: "",
+                              days: 0,
+                              status: "Pending",
+                              reason: "",
+                              appliedOn: "",
+                              approvedBy: "",
+                              remarks: "",
+                              rejectionReason: action.description,
+                            });
+                            setRejectDialog(true);
+                          }}
                           className="px-2.5 py-1 text-xs rounded-md border border-red-200 dark:border-red-900 text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors font-medium"
                         >
                           Reject
@@ -554,7 +727,150 @@ export default function Dashboard() {
             )}
           </motion.div>
         )}
+
+        {/* Reject Dialog */}
+        <Dialog open={rejectDialog} onOpenChange={setRejectDialog}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Reject Leave Request</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 pt-2">
+              <p className="text-sm text-muted-foreground">
+                Please provide a reason for rejecting{" "}
+                <span className="font-medium text-foreground">
+                  {selectedRequest?.employee}
+                </span>
+                's leave request.
+              </p>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">
+                  Rejection Reason *
+                </label>
+                <Textarea
+                  value={rejectReason}
+                  onChange={(e) => setRejectReason(e.target.value)}
+                  placeholder="Enter the reason for rejection..."
+                  className="text-sm min-h-[100px]"
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setRejectDialog(false);
+                    setRejectReason("");
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={handleReject}
+                  disabled={!rejectReason.trim()}
+                >
+                  Reject Leave
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
+      {/* Upcomming Birthdays */}
+
+      <motion.div variants={item} className="glass-card overflow-hidden">
+        <div className="px-5 pt-4 pb-3 border-b border-border space-y-3">
+          <div className="flex items-center gap-2">
+            <CakeIcon className="w-5 h-5 text-orange-500" />
+            <h2 className="text-sm font-semibold">Upcoming Birthdays</h2>
+          </div>
+          <div className="flex gap-1 p-0.5 w-1/2 rounded-lg bg-muted/60 border border-border overflow-x-auto scrollbar-none">
+            {months.map((m) => (
+              <button
+                key={m.label}
+                onClick={() => setSelectedMonth(String(m.value))}
+                className={`shrink-0 px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
+                  selectedMonth === String(m.value)
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="divide-x divide-y divide-border grid grid-cols-3">
+          {filteredBirthdays.length === 0 ? (
+            <p className="text-sm text-muted-foreground p-4 text-center">
+              No birthdays found 🎈
+            </p>
+          ) : (
+            filteredBirthdays.map((emp) => {
+              const isToday = emp.daysLeft === 0;
+
+              return (
+                <div
+                  key={emp.id}
+                  className="flex items-center justify-between px-5 py-3 hover:bg-accent/40 transition"
+                >
+                  <div className="flex gap-5">
+                    <div className="w-12 h-12 rounded-sm bg-primary/10 flex items-center justify-center text-[10px] font-medium text-primary shrink-0 overflow-hidden">
+                      {emp.profile_image ? (
+                        <img
+                          src={emp.profile_image}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        (
+                          `${emp.first_name || ""} ${emp.last_name || ""}`.trim() ||
+                          "E"
+                        )
+                          .split(" ")
+                          .map((n) => n[0])
+                          .join("")
+                      )}
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium">
+                        {emp.first_name} {emp.last_name}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {emp.department || "—"}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="text-right">
+                    {isToday ? (
+                      <span className="text-xs px-2 py-1 rounded-full bg-success/15 text-success">
+                        Today 🎉
+                      </span>
+                    ) : (
+                      <div className="flex flex-col gap-3">
+                        {" "}
+                        <span className="flex  text-xs flex-col gap-1 items-center justify-center rounded-md h-10 w-10 font-bold text-orange-600 bg-orange-100 leading-none">
+                          <span>
+                            {new Date(emp.date_of_birth!)
+                              .toLocaleString("en-US", { month: "short" })
+                              .toUpperCase()}
+                          </span>
+                          <span>{new Date(emp.date_of_birth!).getDate()}</span>
+                        </span>
+                        <span className="text-xs text-muted-foreground font-mono-data">
+                          {emp.daysLeft} day{emp.daysLeft > 1 ? "s" : ""}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </motion.div>
     </motion.div>
   );
 }

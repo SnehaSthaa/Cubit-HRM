@@ -40,24 +40,63 @@ type LoginResponse = {
   };
   token: string;
 };
+export type TakeHomeRequestApi = {
+  id: string;
+  start_date: string;
+  end_date: string;
+  reason: string;
+  status: "pending" | "approved" | "rejected";
+  created_at: string;
+  updated_at: string;
+  asset: {
+    id: string;
+    asset_id: string;
+    name: string;
+    reviewed_by_user_id: string | null;
+
+    reviewer: {
+      id: string;
+      name: string;
+    } | null;
+    employee: {
+      first_name: string;
+      last_name: string;
+      employee_id: string;
+    } | null;
+  };
+};
 export interface AssetApi {
   id: string;
   asset_id: string;
-  assigned_date?: string;
-  return_date?: string;
   name: string;
-  type?: string;
-  category?: string;
-  serial_number: string;
+  status: string;
+  category: string;
+  serial_number: string | null;
+  purchase_cost?: string | null;
+  purchase_date: string | null;
+  assigned_date?: string | null;
+  return_date?: string | null;
+  location?: string | null;
+  notes?: string | null;
+  reason?: string | null;
+  reveiwed_at?: string | null; // ✅ exact schema typo
   assigned_to?: string | null;
+  reviewed_by_user_id?: string | null;
+  created_at?: string;
+  updated_at?: string;
+
   employee?: {
     id: string;
     first_name: string;
     last_name: string;
     department: string;
   } | null;
-  purchase_date: string;
-  status: string;
+  reviewer?: {
+    id: string;
+    name: string;
+  } | null;
+
+  type?: string;
   condition?: string | null;
 }
 export interface LeaveData {
@@ -248,6 +287,16 @@ class ApiClient {
       this.client.get<ApiResponse<LeaveBalance[]>>("/leaves/balance"),
     );
   }
+  updateLeaveBalance(data: {
+    employee_id: string;
+    leave_type_id: string;
+    total: number;
+    reason?: string;
+  }) {
+    return this.parse(
+      this.client.patch<ApiResponse>("/leaves/balance/customize", data),
+    );
+  }
   deleteLeave(id: string) {
     return this.parse(this.client.delete<ApiResponse>(`/leaves/${id}`));
   }
@@ -406,6 +455,52 @@ class ApiClient {
   updateAsset(id: string, data: Record<string, unknown>) {
     return this.parse<void>(
       this.client.put<ApiResponse<void>>(`/assets/${id}`, data),
+    );
+  }
+  exportAssets() {
+    return this.client.get("/assets/export", {
+      responseType: "blob",
+    });
+  }
+  importAssets(file: File) {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    return this.client.post("/assets/import", formData, {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    });
+  }
+
+  // ---------------- TAKE-HOME REQUESTS ----------------
+
+  createTakeHomeAssetRequest(
+    assetId: string,
+    data: { start_date: string; end_date: string; reason: string },
+  ) {
+    return this.parse(
+      this.client.post<ApiResponse>(`/assets/${assetId}/take-home`, data),
+    );
+  }
+
+  getTakeHomeAssetRequest() {
+    return this.parse<TakeHomeRequestApi[]>(
+      this.client.get<ApiResponse<TakeHomeRequestApi[]>>("/assets/take-home"),
+    );
+  }
+
+  getMyTakeHomeRequests() {
+    return this.parse<TakeHomeRequestApi[]>(
+      this.client.get<ApiResponse<TakeHomeRequestApi[]>>(
+        "/assets/take-home/my",
+      ),
+    );
+  }
+
+  reviewTakeHomeRequest(id: string, data: { status: "approved" | "rejected" }) {
+    return this.parse(
+      this.client.patch<ApiResponse>(`/assets/take-home-requests/${id}`, data),
     );
   }
 }

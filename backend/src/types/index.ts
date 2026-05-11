@@ -122,6 +122,8 @@ export interface Asset {
   assigned_date?: Date;
   return_date?: Date;
   location?: string;
+  reviewed_at?: string;
+  reviewed_by_user_id?: string;
   notes?: string;
   created_at: Date;
   updated_at: Date;

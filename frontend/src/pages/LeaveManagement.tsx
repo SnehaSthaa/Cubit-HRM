@@ -40,8 +40,26 @@ const container = {
   hidden: { opacity: 0 },
   show: { opacity: 1, transition: { staggerChildren: 0.05 } },
 };
-
-interface LeaveRequest {
+interface LeaveBalanceApi {
+  id: string;
+  employee_id: string;
+  leave_type_id: string;
+  total: number;
+  used: number;
+  remaining: number;
+  year: number;
+  employee: {
+    id: string;
+    first_name: string;
+    last_name: string;
+    department: string;
+  };
+  leavePolicy: {
+    id: string;
+    name: string;
+  };
+}
+export interface LeaveRequest {
   id: string;
   employee: string;
   type: string;
@@ -75,7 +93,7 @@ interface LeavePolicy {
   active: boolean;
 }
 
-interface LeaveApiResponse {
+export interface LeaveApiResponse {
   id?: string;
   employee_name?: string;
   employee?: { user?: { name?: string }; name?: string } | string;
@@ -96,6 +114,17 @@ interface LeaveApiResponse {
   remarks?: string;
   rejection_reason?: string;
   rejectionReason?: string;
+}
+
+interface LeaveOverride {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  leaveType: string;
+  customQuota: number;
+  reason: string;
+  updatedOn: string;
+  updatedBy: string;
 }
 
 const leaveTypeToEnum: Record<string, string> = {
@@ -131,7 +160,6 @@ export default function LeaveManagement() {
   const { isHR } = useRole();
   const { toast } = useToast();
 
-  // Current employee ID for non-HR users
   const [currentEmployeeId, setCurrentEmployeeId] = useState<string | null>(
     null,
   );
@@ -158,7 +186,6 @@ export default function LeaveManagement() {
   const [editDialog, setEditDialog] = useState(false);
   const [editData, setEditData] = useState<LeaveRequest | null>(null);
 
-  // Holiday management
   const [holidayDialog, setHolidayDialog] = useState(false);
   const [editHoliday, setEditHoliday] = useState<Holiday | null>(null);
   const [newHoliday, setNewHoliday] = useState({
@@ -168,7 +195,22 @@ export default function LeaveManagement() {
     holiday_type: "public" as Holiday["holiday_type"],
   });
 
-  // Policy management
+  const [overrides, setOverrides] = useState<LeaveOverride[]>([]);
+  const [overrideDialog, setOverrideDialog] = useState(false);
+  const [overrideSort, setOverrideSort] = useState<{
+    key: string;
+    dir: "asc" | "desc";
+  }>({ key: "employeeName", dir: "asc" });
+  const [newOverride, setNewOverride] = useState({
+    employeeId: "",
+    leaveType: "",
+    customQuota: 0,
+    reason: "",
+  });
+  const [editOverride, setEditOverride] = useState<LeaveOverride | null>(null);
+  //Leave Balance
+  const [allBalances, setAllBAlances] = useState<LeaveBalanceApi[]>([]);
+  const [balancesLoading, setBalancesLoading] = useState(false);
   const [policyDialog, setPolicyDialog] = useState(false);
   const [editPolicy, setEditPolicy] = useState<LeavePolicy | null>(null);
   const [newPolicy, setNewPolicy] = useState({
@@ -180,7 +222,6 @@ export default function LeaveManagement() {
     maxCarryForward: 0,
   });
 
-  // Apply leave form
   const [newLeave, setNewLeave] = useState({
     employee: "",
     type: "",
@@ -206,10 +247,8 @@ export default function LeaveManagement() {
     active: p.active,
   });
 
-  // ── Fetch helpers ─────────────────────────────────────────────────────────────
-
   const fetchEmployees = async () => {
-    if (!isHR) return; // employees don't need the full list
+    if (!isHR) return;
     try {
       const res = await apiClient.getEmployees();
       setEmployees(Array.isArray(res.data) ? res.data : []);
@@ -221,13 +260,10 @@ export default function LeaveManagement() {
   const fetchLeaves = async () => {
     try {
       let data: LeaveApiResponse[] = [];
-
       if (isHR) {
-        // HR fetches all leaves
         const res = await apiClient.getLeaves();
         data = Array.isArray(res.data) ? res.data : [];
       } else {
-        // Employees only fetch their own leaves
         if (!currentEmployeeId) return;
         const res = await apiClient.getLeavesByEmployee(currentEmployeeId);
         data = Array.isArray(res.data) ? res.data : [];
@@ -292,35 +328,71 @@ export default function LeaveManagement() {
       console.error("Failed to fetch holidays", err);
     }
   };
+  //Fetch LeaveBalances
+  const fetchAllBalances = async () => {
+    if (!isHR) return;
+    setBalancesLoading(true);
+    try {
+      const res = await apiClient.getAllLeaveBalances();
+      setAllBAlances(
+        Array.isArray(res.data)
+          ? (res.data as unknown as LeaveBalanceApi[])
+          : [],
+      );
+    } catch (err) {
+      console.log("Failed to fetch leave balances", err);
+    } finally {
+      setBalancesLoading(false);
+    }
+  };
 
   useEffect(() => {
     fetchEmployees();
     fetchPolicies();
     fetchHolidays();
+    fetchAllBalances();
   }, [isHR]);
 
-  // Separate effect for leaves — waits until we have the employee ID
   useEffect(() => {
     if (isHR || currentEmployeeId) {
       fetchLeaves();
     }
   }, [isHR, currentEmployeeId]);
 
-  // ── Leave handlers ────────────────────────────────────────────────────────────
-
   const handleApplyLeave = async () => {
-    if (!newLeave.type || !newLeave.from || !newLeave.to || !newLeave.reason)
+    if (!newLeave.type) {
+      toast({ title: "Leave type is required", variant: "destructive" });
       return;
-    if (isHR && applyForEmployee && !newLeave.employee) return;
-
+    }
+    if (!newLeave.from) {
+      toast({ title: "Start date is required", variant: "destructive" });
+      return;
+    }
+    if (!newLeave.to) {
+      toast({ title: "End date is required", variant: "destructive" });
+      return;
+    }
+    if (new Date(newLeave.to) < new Date(newLeave.from)) {
+      toast({
+        title: "End date cannot be before start date",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (!newLeave.reason.trim()) {
+      toast({ title: "Reason is required", variant: "destructive" });
+      return;
+    }
+    if (isHR && applyForEmployee && !newLeave.employee) {
+      toast({ title: "Please select an employee", variant: "destructive" });
+      return;
+    }
     try {
       const policy = policies.find((p) => p.name === newLeave.type);
-
       const employeeId =
         isHR && applyForEmployee
           ? employees.find((e) => e.id === newLeave.employee)?.id
-          : currentEmployeeId; // employees always use their own ID
-
+          : currentEmployeeId;
       if (!employeeId || !policy?.id) {
         toast({
           title: "Error",
@@ -328,7 +400,6 @@ export default function LeaveManagement() {
         });
         return;
       }
-
       await apiClient.createLeave({
         employee_id: employeeId,
         start_date: newLeave.from,
@@ -336,14 +407,12 @@ export default function LeaveManagement() {
         leave_type_id: policy.id,
         reason: newLeave.reason,
       });
-
       await fetchLeaves();
       toast({ title: "Leave applied" });
     } catch (err) {
       console.error("Create leave error:", err);
       toast({ title: "Error", description: "Failed to submit leave request." });
     }
-
     setNewLeave({ employee: "", type: "", from: "", to: "", reason: "" });
     setApplyForEmployee(false);
     setApplyDialog(false);
@@ -353,6 +422,7 @@ export default function LeaveManagement() {
     try {
       await apiClient.approveLeave(req.id);
       await fetchLeaves();
+      await fetchAllBalances();
       setSelectedRequest((prev) =>
         prev ? { ...prev, status: "Approved", approvedBy: "HR Admin" } : null,
       );
@@ -385,6 +455,21 @@ export default function LeaveManagement() {
 
   const handleEditLeave = async () => {
     if (!editData) return;
+    if (!editData.from || !editData.to) {
+      toast({ title: "Dates are required", variant: "destructive" });
+      return;
+    }
+    if (new Date(editData.to) < new Date(editData.from)) {
+      toast({
+        title: "End date cannot be before start date",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (!editData.reason.trim()) {
+      toast({ title: "Reason is required", variant: "destructive" });
+      return;
+    }
     try {
       const payload = {
         leave_type:
@@ -411,6 +496,7 @@ export default function LeaveManagement() {
     try {
       await apiClient.deleteLeave(id);
       await fetchLeaves();
+      await fetchAllBalances();
       if (selectedRequest?.id === id) setSelectedRequest(null);
       toast({ title: "Leave request deleted" });
     } catch {
@@ -418,55 +504,82 @@ export default function LeaveManagement() {
     }
   };
 
-  // ── Holiday handlers ──────────────────────────────────────────────────────────
-
   const handleSaveHoliday = async () => {
+    if (!newHoliday.name.trim()) {
+      toast({ title: "Holiday name is required", variant: "destructive" });
+      return;
+    }
+    if (!newHoliday.start_date) {
+      toast({ title: "Start date is required", variant: "destructive" });
+      return;
+    }
+    if (!newHoliday.end_date) {
+      toast({ title: "End date is required", variant: "destructive" });
+      return;
+    }
+    if (new Date(newHoliday.end_date) < new Date(newHoliday.start_date)) {
+      toast({
+        title: "End date cannot be before start date",
+        variant: "destructive",
+      });
+      return;
+    }
     try {
-      if (editHoliday) {
-        if (
-          !editHoliday.name ||
-          !editHoliday.start_date ||
-          !editHoliday.end_date
-        ) {
-          toast({ title: "All fields required" });
-          return;
-        }
-        await apiClient.updateHoliday(editHoliday.id, {
-          name: editHoliday.name,
-          start_date: editHoliday.start_date,
-          end_date: editHoliday.end_date,
-          holiday_type: editHoliday.holiday_type,
-        });
-        toast({ title: "Holiday updated" });
-      } else {
-        if (
-          !newHoliday.name ||
-          !newHoliday.start_date ||
-          !newHoliday.end_date
-        ) {
-          toast({ title: "All fields required" });
-          return;
-        }
-        await apiClient.createHoliday({
-          name: newHoliday.name,
-          start_date: newHoliday.start_date,
-          end_date: newHoliday.end_date,
-          holiday_type: newHoliday.holiday_type,
-        });
-        toast({ title: "Holiday added" });
-      }
+      await apiClient.createHoliday({
+        name: newHoliday.name,
+        start_date: newHoliday.start_date,
+        end_date: newHoliday.end_date,
+        holiday_type: newHoliday.holiday_type,
+      });
       await fetchHolidays();
       setHolidayDialog(false);
-      setEditHoliday(null);
       setNewHoliday({
         name: "",
         start_date: "",
         end_date: "",
         holiday_type: "public",
       });
+      toast({ title: "Holiday added" });
     } catch (err) {
-      console.error("Failed to save holiday", err);
-      toast({ title: "Error", description: "Failed to save holiday." });
+      console.error("Failed to add holiday", err);
+      toast({ title: "Error", description: "Failed to add holiday." });
+    }
+  };
+
+  const handleUpdateHoliday = async () => {
+    if (!editHoliday) return;
+    if (!editHoliday.name.trim()) {
+      toast({ title: "Holiday name is required", variant: "destructive" });
+      return;
+    }
+    if (!editHoliday.start_date) {
+      toast({ title: "Start date is required", variant: "destructive" });
+      return;
+    }
+    if (!editHoliday.end_date) {
+      toast({ title: "End date is required", variant: "destructive" });
+      return;
+    }
+    if (new Date(editHoliday.end_date) < new Date(editHoliday.start_date)) {
+      toast({
+        title: "End date cannot be before start date",
+        variant: "destructive",
+      });
+      return;
+    }
+    try {
+      await apiClient.updateHoliday(editHoliday.id, {
+        name: editHoliday.name,
+        start_date: editHoliday.start_date,
+        end_date: editHoliday.end_date,
+        holiday_type: editHoliday.holiday_type,
+      });
+      await fetchHolidays();
+      setEditHoliday(null);
+      toast({ title: "Holiday updated" });
+    } catch (err) {
+      console.error("Failed to update holiday", err);
+      toast({ title: "Error", description: "Failed to update holiday." });
     }
   };
 
@@ -480,9 +593,25 @@ export default function LeaveManagement() {
     }
   };
 
-  // ── Policy handlers ───────────────────────────────────────────────────────────
-
   const handleCreatePolicy = async () => {
+    if (!newPolicy.name.trim()) {
+      toast({ title: "Policy name is required", variant: "destructive" });
+      return;
+    }
+    if (newPolicy.annualQuota < 0) {
+      toast({
+        title: "Annual quota cannot be negative",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (newPolicy.carryForward && newPolicy.maxCarryForward < 0) {
+      toast({
+        title: "Max carry forward cannot be negative",
+        variant: "destructive",
+      });
+      return;
+    }
     try {
       await apiClient.createPolicy({
         name: newPolicy.name,
@@ -542,6 +671,115 @@ export default function LeaveManagement() {
     }
   };
 
+  const handleSaveOverride = async () => {
+    if (!newOverride.employeeId) {
+      toast({ title: "Please select an employee", variant: "destructive" });
+      return;
+    }
+    if (!newOverride.leaveType) {
+      toast({ title: "Please select a leave type", variant: "destructive" });
+      return;
+    }
+    if (newOverride.customQuota < 0) {
+      toast({ title: "Quota cannot be negative", variant: "destructive" });
+      return;
+    }
+    if (!newOverride.reason.trim()) {
+      toast({ title: "Reason is required", variant: "destructive" });
+      return;
+    }
+
+    const policy = policies.find((p) => p.name === newOverride.leaveType);
+    if (!policy) {
+      toast({ title: "Invalid leave type", variant: "destructive" });
+      return;
+    }
+
+    try {
+      await apiClient.updateLeaveBalance({
+        employee_id: newOverride.employeeId,
+        leave_type_id: policy.id,
+        total: newOverride.customQuota,
+        reason: newOverride.reason,
+      });
+      await fetchAllBalances();
+      setOverrideDialog(false);
+      setNewOverride({
+        employeeId: "",
+        leaveType: "",
+        customQuota: 0,
+        reason: "",
+      });
+      toast({ title: "Leave quota customized" });
+    } catch (err) {
+      console.error("Failed to customize leave", err);
+      toast({ title: "Error", description: "Failed to update leave quota." });
+    }
+  };
+  // Add this effect inside the component, near the other state
+  useEffect(() => {
+    if (!newOverride.employeeId || !newOverride.leaveType) return;
+    const policy = policies.find((p) => p.name === newOverride.leaveType);
+    if (!policy) return;
+    const existing = allBalances.find(
+      (b) =>
+        b.employee_id === newOverride.employeeId &&
+        b.leave_type_id === policy.id,
+    );
+    setNewOverride((prev) => ({
+      ...prev,
+      customQuota: existing?.total ?? policy.annualQuota,
+    }));
+  }, [newOverride.employeeId, newOverride.leaveType]);
+
+  const handleDeleteOverride = (id: string) => {
+    setOverrides((prev) => prev.filter((o) => o.id !== id));
+    toast({ title: "Custom leave removed" });
+  };
+
+  const sortOverride = (key: string) => {
+    setOverrideSort((prev) => ({
+      key,
+      dir: prev.key === key && prev.dir === "asc" ? "desc" : "asc",
+    }));
+  };
+
+  const sortedOverrides = [...overrides].sort((a, b) => {
+    const av = a[overrideSort.key];
+    const bv = b[overrideSort.key];
+    const cmp =
+      typeof av === "number" ? av - bv : String(av).localeCompare(String(bv));
+    return overrideSort.dir === "asc" ? cmp : -cmp;
+  });
+
+  const activePolicies = policies.filter((p) => p.active);
+  const now = new Date();
+  const yearStart = new Date(now.getFullYear(), 0, 1);
+  const employeeBalances = employees.map((emp) => {
+    const join = emp.joining_date ? new Date(emp.joining_date) : yearStart;
+    const startRef = join > yearStart ? join : yearStart;
+    const monthsWorked = Math.max(
+      0,
+      (now.getFullYear() - startRef.getFullYear()) * 12 +
+        (now.getMonth() - startRef.getMonth()) +
+        1,
+    );
+
+    const types = activePolicies.map((policy) => {
+      const balance = allBalances.find(
+        (b) => b.employee_id === emp.id && b.leave_type_id === policy.id,
+      );
+      return {
+        type: policy.name,
+        policyId: policy.id,
+        total: balance?.total ?? policy.annualQuota,
+        used: balance?.used ?? 0,
+        remaining: balance?.remaining ?? policy.annualQuota,
+      };
+    });
+    return { employee: emp, types };
+  });
+
   return (
     <motion.div
       variants={container}
@@ -581,8 +819,6 @@ export default function LeaveManagement() {
                   Submitted by {selectedRequest.employee}
                 </p>
               </div>
-
-              {/* HR actions on detail view */}
               {isHR && (
                 <div className="flex gap-2">
                   {selectedRequest.status === "Pending" && (
@@ -626,8 +862,6 @@ export default function LeaveManagement() {
                   </Button>
                 </div>
               )}
-
-              {/* Employee can delete their own pending leave from detail view */}
               {!isHR && selectedRequest.status === "Pending" && (
                 <Button
                   variant="outline"
@@ -640,7 +874,6 @@ export default function LeaveManagement() {
                 </Button>
               )}
             </div>
-
             <div className="grid grid-cols-2 gap-6">
               <div className="space-y-4">
                 <div className="flex items-center gap-3 p-3 bg-muted/30 rounded-lg">
@@ -705,7 +938,6 @@ export default function LeaveManagement() {
                 )}
               </div>
             </div>
-
             <div className="mt-6 pt-6 border-t border-border">
               <h3 className="text-sm font-semibold mb-3">Status Timeline</h3>
               <div className="space-y-3">
@@ -929,6 +1161,15 @@ export default function LeaveManagement() {
                     Leave Policies
                   </TabsTrigger>
                 )}
+                {isHR && (
+                  <TabsTrigger
+                    value="balances"
+                    className="gap-1.5 text-xs data-[state=active]:bg-card data-[state=active]:shadow-sm"
+                  >
+                    <User className="w-3.5 h-3.5" />
+                    Leave Balances
+                  </TabsTrigger>
+                )}
               </TabsList>
 
               {/* LEAVE REQUESTS */}
@@ -998,7 +1239,6 @@ export default function LeaveManagement() {
                               </td>
                               <td onClick={(e) => e.stopPropagation()}>
                                 <div className="flex gap-1">
-                                  {/* HR can edit non-approved leaves */}
                                   {isHR && (
                                     <Button
                                       variant="ghost"
@@ -1013,7 +1253,6 @@ export default function LeaveManagement() {
                                       <Edit2 className="w-3 h-3" />
                                     </Button>
                                   )}
-                                  {/* HR can delete any leave; employees can only delete their own pending leaves */}
                                   {(isHR || req.status === "Pending") && (
                                     <Button
                                       variant="ghost"
@@ -1032,8 +1271,6 @@ export default function LeaveManagement() {
                       </tbody>
                     </table>
                   </div>
-
-                  {/* Upcoming Holidays sidebar */}
                   <div className="bg-card border border-border rounded-lg">
                     <div className="px-4 py-3 border-b border-border">
                       <h2 className="text-sm font-medium">Upcoming Holidays</h2>
@@ -1201,7 +1438,41 @@ export default function LeaveManagement() {
                         .map((h) => (
                           <tr key={h.id}>
                             <td className="font-mono-data text-xs">
-                              {h.start_date} → {h.end_date}
+                              <div className="w-10 h-10 rounded-lg bg-primary/10 flex flex-col items-center justify-center shrink-0">
+                                <span className="text-[12px] font-bold text-primary leading-none">
+                                  {new Date(h.start_date)
+                                    .toLocaleDateString("en", {
+                                      month: "short",
+                                    })
+                                    .toUpperCase()}
+                                </span>
+                                {h.start_date === h.end_date ? (
+                                  <span className="text-[12px] ">
+                                    {new Date(h.start_date).toLocaleDateString(
+                                      "en",
+                                      {
+                                        day: "numeric",
+                                      },
+                                    )}
+                                  </span>
+                                ) : (
+                                  <span className="text-[12px] ">
+                                    {new Date(h.start_date).toLocaleDateString(
+                                      "en",
+                                      {
+                                        day: "numeric",
+                                      },
+                                    )}
+                                    {" - "}
+                                    {new Date(h.end_date).toLocaleDateString(
+                                      "en",
+                                      {
+                                        day: "numeric",
+                                      },
+                                    )}
+                                  </span>
+                                )}
+                              </div>
                             </td>
                             <td className="text-sm font-medium">{h.name}</td>
                             <td>
@@ -1457,6 +1728,315 @@ export default function LeaveManagement() {
                   </div>
                 </TabsContent>
               )}
+
+              {/* EMPLOYEE BALANCES — HR only */}
+              {isHR && (
+                <TabsContent value="balances" className="space-y-4 mt-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-sm font-semibold">
+                        Employee Leave Balances
+                      </h3>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Customize leave quotas per employee with reason.
+                        Defaults come from active policies.
+                      </p>
+                    </div>
+                    <Dialog
+                      open={overrideDialog}
+                      onOpenChange={setOverrideDialog}
+                    >
+                      <DialogTrigger asChild>
+                        <Button size="sm" className="gap-1.5 press-effect">
+                          <Plus className="w-3.5 h-3.5" />
+                          Customize Leave
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent className="max-w-md">
+                        <DialogHeader>
+                          <DialogTitle>Customize Employee Leave</DialogTitle>
+                        </DialogHeader>
+                        <div className="space-y-3 pt-2">
+                          <div>
+                            <label className="text-xs text-muted-foreground mb-1 block">
+                              Employee *
+                            </label>
+                            <Select
+                              value={newOverride.employeeId}
+                              onValueChange={(v) =>
+                                setNewOverride({
+                                  ...newOverride,
+                                  employeeId: v,
+                                })
+                              }
+                            >
+                              <SelectTrigger className="h-9 text-sm">
+                                <SelectValue placeholder="Select employee" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {employees.map((e) => (
+                                  <SelectItem key={e.id} value={e.id}>
+                                    {e.first_name} — {e.department}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div>
+                            <label className="text-xs text-muted-foreground mb-1 block">
+                              Leave Type *
+                            </label>
+                            <Select
+                              value={newOverride.leaveType}
+                              onValueChange={(v) =>
+                                setNewOverride({ ...newOverride, leaveType: v })
+                              }
+                            >
+                              <SelectTrigger className="h-9 text-sm">
+                                <SelectValue placeholder="Select leave type" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {leaveTypes.map((t) => (
+                                  <SelectItem key={t} value={t}>
+                                    {t}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div>
+                            <label className="text-xs text-muted-foreground mb-1 block">
+                              Custom Quota (days)
+                            </label>
+                            <Input
+                              type="number"
+                              min={0}
+                              value={newOverride.customQuota}
+                              onChange={(e) =>
+                                setNewOverride({
+                                  ...newOverride,
+                                  customQuota: +e.target.value,
+                                })
+                              }
+                              className="h-9 text-sm font-mono-data"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-xs text-muted-foreground mb-1 block">
+                              Reason *
+                            </label>
+                            <Textarea
+                              value={newOverride.reason}
+                              onChange={(e) =>
+                                setNewOverride({
+                                  ...newOverride,
+                                  reason: e.target.value,
+                                })
+                              }
+                              placeholder="Why this customization is needed..."
+                              className="text-sm min-h-[80px]"
+                            />
+                          </div>
+                          <div className="flex justify-end gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setOverrideDialog(false)}
+                            >
+                              Cancel
+                            </Button>
+                            <Button size="sm" onClick={handleSaveOverride}>
+                              Save Customization
+                            </Button>
+                          </div>
+                        </div>
+                      </DialogContent>
+                    </Dialog>
+                  </div>
+
+                  {/* Replace the Active Customizations section */}
+                  <div className="bg-card border border-border rounded-lg overflow-hidden">
+                    <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+                      <h4 className="text-sm font-medium">
+                        Active Customizations
+                      </h4>
+                      <span className="text-xs text-muted-foreground">
+                        {
+                          allBalances.filter((b) => {
+                            const policy = policies.find(
+                              (p) => p.id === b.leave_type_id,
+                            );
+                            return policy && b.total !== policy.annualQuota;
+                          }).length
+                        }{" "}
+                        custom rule(s)
+                      </span>
+                    </div>
+                    {(() => {
+                      const customized = allBalances.filter((b) => {
+                        const policy = policies.find(
+                          (p) => p.id === b.leave_type_id,
+                        );
+                        return policy && b.total !== policy.annualQuota;
+                      });
+                      return customized.length === 0 ? (
+                        <div className="p-6 text-center text-xs text-muted-foreground">
+                          No custom leave rules yet. Click "Customize Leave" to
+                          override an employee's quota.
+                        </div>
+                      ) : (
+                        <table className="nexus-table">
+                          <thead>
+                            <tr>
+                              <th>Employee</th>
+                              <th>Leave Type</th>
+                              <th>Custom Quota</th>
+                              <th>Default Quota</th>
+                              <th>Used</th>
+                              <th>Remaining</th>
+                              <th className="w-20">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {customized.map((b) => {
+                              const policy = policies.find(
+                                (p) => p.id === b.leave_type_id,
+                              );
+                              return (
+                                <tr key={b.id}>
+                                  <td className="text-sm font-medium">
+                                    {b.employee.first_name}{" "}
+                                    {b.employee.last_name}
+                                  </td>
+                                  <td className="text-sm text-muted-foreground">
+                                    {b.leavePolicy.name}
+                                  </td>
+                                  <td className="font-mono-data text-xs font-semibold text-primary">
+                                    {b.total} days
+                                  </td>
+                                  <td className="font-mono-data text-xs text-muted-foreground">
+                                    {policy?.annualQuota ?? "—"} days
+                                  </td>
+                                  <td className="font-mono-data text-xs">
+                                    {b.used}
+                                  </td>
+                                  <td className="font-mono-data text-xs">
+                                    <span
+                                      className={
+                                        b.remaining < 0
+                                          ? "text-destructive font-semibold"
+                                          : ""
+                                      }
+                                    >
+                                      {b.remaining}
+                                    </span>
+                                  </td>
+                                  <td>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-6 px-1.5"
+                                      onClick={() => {
+                                        const policyName =
+                                          policies.find(
+                                            (p) => p.id === b.leave_type_id,
+                                          )?.name ?? "";
+                                        setNewOverride({
+                                          employeeId: b.employee_id,
+                                          leaveType: policyName,
+                                          customQuota: b.total,
+                                          reason: "",
+                                        });
+                                        setOverrideDialog(true);
+                                      }}
+                                    >
+                                      <Edit2 className="w-3 h-3" />
+                                    </Button>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      );
+                    })()}
+                  </div>
+
+                  <div className="bg-card border border-border rounded-lg overflow-hidden">
+                    <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+                      <h4 className="text-sm font-medium">
+                        All Employee Leave Balances
+                      </h4>
+                      <button
+                        onClick={fetchAllBalances}
+                        className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        {balancesLoading ? "Refreshing…" : "Refresh"}
+                      </button>
+                    </div>
+                    {balancesLoading ? (
+                      <div className="p-8 text-center text-xs text-muted-foreground">
+                        Loading balances…
+                      </div>
+                    ) : (
+                      <table className="nexus-table">
+                        <thead>
+                          <tr>
+                            <th>Employee</th>
+                            {activePolicies.map((p) => (
+                              <th key={p.id} className="text-center">
+                                {p.name}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {employeeBalances.length === 0 ? (
+                            <tr>
+                              <td
+                                colSpan={activePolicies.length + 1}
+                                className="text-center text-sm text-muted-foreground py-8"
+                              >
+                                No balance data yet. Balances are created when
+                                leaves are approved.
+                              </td>
+                            </tr>
+                          ) : (
+                            employeeBalances.map(({ employee, types }) => (
+                              <tr key={employee.id}>
+                                <td className="text-sm font-medium">
+                                  {employee.first_name} {employee.last_name}
+                                </td>
+                                {types.map((t) => (
+                                  <td key={t.policyId} className="text-center">
+                                    <div className="inline-flex flex-col items-center gap-0.5">
+                                      <span className="font-mono-data text-xs">
+                                        <span
+                                          className={`font-semibold ${t.remaining < 0 ? "text-destructive" : ""}`}
+                                        >
+                                          {t.remaining}
+                                        </span>
+                                        <span className="text-muted-foreground">
+                                          /{t.total}
+                                        </span>
+                                      </span>
+                                      {t.used > 0 && (
+                                        <span className="text-[9px] text-muted-foreground">
+                                          {t.used} used
+                                        </span>
+                                      )}
+                                    </div>
+                                  </td>
+                                ))}
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                </TabsContent>
+              )}
             </Tabs>
           </motion.div>
         </>
@@ -1700,7 +2280,7 @@ export default function LeaveManagement() {
                 >
                   Cancel
                 </Button>
-                <Button size="sm" onClick={handleSaveHoliday}>
+                <Button size="sm" onClick={handleUpdateHoliday}>
                   Save Changes
                 </Button>
               </div>

@@ -6,6 +6,11 @@ import {
   hasRequiredPermission,
 } from "@/middleware/auth.js";
 import { EmployeesAction } from "@/permissions/permission.js";
+import { validate } from "@/middleware/validate.js";
+import {
+  createHolidaySchema,
+  updateHolidaySchema,
+} from "@/validators/holiday.validator.js";
 
 const router = Router();
 router.use(authenticate);
@@ -13,6 +18,7 @@ router.post(
   "/",
   authorize("super_admin", "hr_admin"),
   hasRequiredPermission([EmployeesAction.Create]),
+  validate(createHolidaySchema),
   HolidayController.create,
 );
 router.get(
@@ -31,6 +37,7 @@ router.put(
   "/:id",
   authorize("super_admin", "hr_admin"),
   hasRequiredPermission([EmployeesAction.Edit]),
+  validate(updateHolidaySchema),
   HolidayController.update,
 );
 export default router;

@@ -184,7 +184,6 @@ export type AssetStatus =
   | "Under Maintenance"
   | "Retired"
   | "Pending Approval";
-export type AssetCondition = "Good" | "Fair" | "Needs Repair";
 
 export interface Asset {
   id: string;
@@ -199,7 +198,8 @@ export interface Asset {
   department: string | null;
   purchaseDate: string;
   status: AssetStatus;
-  condition: AssetCondition;
+  reviewedBy?: string | null;
+  reviewedAt?: string | null;
 }
 
 export interface EmployeeAsset {

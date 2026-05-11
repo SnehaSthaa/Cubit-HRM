@@ -437,7 +437,68 @@ export class LeaveController {
       });
     }
   }
-  // =========================
+  //UPDATE LEAVE BALANCES
+  static async updateLeaveBalance(req: Request, res: Response) {
+    try {
+      const { employee_id, leave_type_id, total, reason } = req.body;
+      if (!employee_id || !leave_type_id || total == null)
+        return res.status(400).json({
+          success: false,
+          message: "employee_id, leave_type_id, and total are required",
+        });
+      if (total < 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Total cannot be negative",
+        });
+      }
+      const year = new Date().getFullYear();
+      const existing = await prisma.leaveBalance.findUnique({
+        where: {
+          employee_id_year_leave_type_id: {
+            employee_id,
+            year,
+            leave_type_id,
+          },
+        },
+      });
+      const used = existing?.used ?? 0;
+
+      const balance = await prisma.leaveBalance.upsert({
+        where: {
+          employee_id_year_leave_type_id: {
+            employee_id,
+            year,
+            leave_type_id,
+          },
+        },
+        update: {
+          total,
+          remaining: total - used,
+        },
+        create: {
+          employee_id,
+          year,
+          leave_type_id,
+          total,
+          used: 0,
+          remaining: total,
+        },
+      });
+
+      return res.json({
+        success: true,
+        message: "Leave balance updated",
+        data: balance,
+      });
+    } catch (error: any) {
+      return res.status(500).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  }
+
   // GET LEAVES BY EMPLOYEE ID
 
   static async getByEmployee(req: Request, res: Response<ApiResponse>) {

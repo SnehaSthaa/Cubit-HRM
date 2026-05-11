@@ -31,6 +31,7 @@ import {
   AlertTriangle,
   Baby,
   LucideIcon,
+  CalendarCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -108,12 +109,13 @@ interface ProfileFormData {
 }
 
 const leaveTypeIcons: Record<string, LucideIcon> = {
-  sick: Stethoscope,
-  paid: Briefcase,
-  vacation: Plane,
-  casual: Coffee,
-  unpaid: AlertTriangle,
-  maternity: Baby,
+  "sick leave": Stethoscope,
+  " paid leave": Briefcase,
+  " vacation leave": Plane,
+  "custom leave": Coffee,
+  "unpaid leave": AlertTriangle,
+  "maternity leave": Baby,
+  "annual leave": CalendarCheck,
 };
 
 type Section = "profile" | "bank" | "department";
@@ -1691,7 +1693,8 @@ export default function EmployeeProfile() {
                     ? Math.round((lb.used / lb.total) * 100)
                     : 0;
 
-                  const Icon = leaveTypeIcons[lb.leave_type] || Briefcase;
+                  const Icon =
+                    leaveTypeIcons[lb.leave_type.toLowerCase()] || Briefcase;
 
                   return (
                     <div

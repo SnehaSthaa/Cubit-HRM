@@ -33,6 +33,7 @@ import {
   KeyRound,
   EyeOff,
   Eye,
+  CalendarCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -110,12 +111,13 @@ interface ProfileFormData {
 type Section = "profile" | "bank" | "department";
 
 const leaveTypeIcons: Record<string, LucideIcon> = {
-  sick: Stethoscope,
-  paid: Briefcase,
-  vacation: Plane,
-  casual: Coffee,
-  unpaid: AlertTriangle,
-  maternity: Baby,
+  "sick leave": Stethoscope,
+  " paid leave": Briefcase,
+  " vacation leave": Plane,
+  "custom leave": Coffee,
+  "unpaid leave": AlertTriangle,
+  "maternity leave": Baby,
+  "annual leave": CalendarCheck,
 };
 
 const documentTypes = [
@@ -1071,7 +1073,7 @@ export default function EmployeeSelfService() {
                   value: "leave",
                   icon: CalendarDays,
                   label: "Leaves",
-                  section: null,
+                  section: "leave" as Section,
                 },
                 {
                   value: "emergency",
@@ -1453,7 +1455,8 @@ export default function EmployeeSelfService() {
                   const percentage = lb.total
                     ? Math.round((lb.used / lb.total) * 100)
                     : 0;
-                  const Icon = leaveTypeIcons[lb.leave_type] || Briefcase;
+                  const Icon =
+                    leaveTypeIcons[lb.leave_type?.toLowerCase()] ?? Briefcase;
                   return (
                     <div
                       key={lb.leave_type}

@@ -1,9 +1,22 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Search, Plus, Filter, MoreHorizontal, X, Trash2 } from "lucide-react";
+import {
+  Search,
+  Plus,
+  Filter,
+  MoreHorizontal,
+  X,
+  Trash2,
+  ArrowUp,
+  ArrowUpDown,
+  ArrowDown,
+} from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { employeeSchema, EmployeeFormData } from "@/schemas/employee.schema";
 import {
   Dialog,
   DialogContent,
@@ -118,16 +131,20 @@ export default function EmployeeList() {
   const [addDialog, setAddDialog] = useState(false);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
-  const [newEmp, setNewEmp] = useState({
-    employeeid: "",
-    name: "",
-    email: "",
-    phone: "",
-    dob: "",
-    department: "",
-    position: "",
-    type: "Full-time",
-    joinDate: "",
+  const [sortEmployeeId, setSortEmployeeId] = useState<"asc" | "desc" | null>(
+    null,
+  );
+  const [sortEmployeeName, setSortEmployeeName] = useState<
+    "asc" | "desc" | null
+  >(null);
+  const {
+    register,
+    handleSubmit,
+    setValue,
+    reset,
+    formState: { errors },
+  } = useForm<EmployeeFormData>({
+    resolver: zodResolver(employeeSchema),
   });
 
   // Fetch employees from API
@@ -163,55 +180,75 @@ export default function EmployeeList() {
     fetchEmployees();
   }, []);
 
-  const filtered = employees.filter((e) => {
-    const q = search.toLowerCase();
+  const filtered = employees
+    .filter((e) => {
+      const q = search.toLowerCase();
 
-    const matchSearch =
-      e.name?.toLowerCase().includes(q) ||
-      e.id.toLowerCase().includes(q) ||
-      e.department?.toLowerCase().includes(q);
-    const matchDept = filterDept === "all" || e.department === filterDept;
-    const matchStatus = filterStatus === "all" || e.status === filterStatus;
-    const matchType =
-      filterType === "all" || (e.type ?? "Full-time") === filterType;
+      const matchSearch =
+        e.name?.toLowerCase().includes(q) ||
+        e.id.toLowerCase().includes(q) ||
+        e.department?.toLowerCase().includes(q);
+      const matchDept = filterDept === "all" || e.department === filterDept;
+      const matchStatus = filterStatus === "all" || e.status === filterStatus;
+      const matchType =
+        filterType === "all" || (e.type ?? "Full-time") === filterType;
 
-    return matchSearch && matchDept && matchStatus && matchType;
-  });
+      return matchSearch && matchDept && matchStatus && matchType;
+    })
+    .sort((a, b) => {
+      if (sortEmployeeId) {
+        const employeeIdA = a.employee_id.toLocaleLowerCase();
+        const employeeIdB = b.employee_id.toLocaleLowerCase();
+        return sortEmployeeId === "asc"
+          ? employeeIdA.localeCompare(employeeIdB)
+          : employeeIdB.localeCompare(employeeIdA);
+      }
+      if (sortEmployeeName) {
+        const employeeNameA = a.name.toLocaleLowerCase();
+        const employeeNameB = b.name.toLocaleLowerCase();
+        return sortEmployeeName === "asc"
+          ? employeeNameA.localeCompare(employeeNameB)
+          : employeeNameB.localeCompare(employeeNameA);
+      }
+    });
 
   const hasFilters =
     filterDept !== "all" || filterStatus !== "all" || filterType !== "all";
 
-  const handleAddEmployee = async () => {
-    if (!newEmp.name || !newEmp.email || !newEmp.department) {
-      toast({ title: "Error", description: "Please fill in required fields" });
-      return;
-    }
+  const handleAddEmployee = async (data: EmployeeFormData) => {
+    const nameParts = data.full_name.trim().split(" ");
+    const first_name = nameParts[0];
+    const last_name = nameParts.slice(1).join(" ") || nameParts[0];
 
     try {
-      const employeeData: Record<string, unknown> = {
-        first_name: newEmp.name.split(" ")[0],
-        last_name: newEmp.name.split(" ").slice(1).join(" ") || "",
-        email: newEmp.email,
-        department: newEmp.department,
-        joining_date: newEmp.joinDate || new Date().toISOString().split("T")[0],
-      };
+      const existingEmployees = await apiClient.getEmployees();
+      const isDuplicate = existingEmployees.data?.some(
+        (emp) => emp.employee_id === data.employee_id,
+      );
 
-      if (newEmp.employeeid) {
-        employeeData.employee_id = newEmp.employeeid;
+      if (isDuplicate) {
+        toast({
+          title: "Error",
+          description: `Employee ID "${data.employee_id}" is already in use.`,
+          variant: "destructive",
+        });
+        return;
       }
-      if (newEmp.phone) {
-        employeeData.phone = newEmp.phone;
-      }
-      if (newEmp.dob) {
-        employeeData.date_of_birth = newEmp.dob;
-      }
-      if (newEmp.position) {
-        employeeData.position = newEmp.position;
-      }
+      const employeeData: Record<string, unknown> = {
+        first_name,
+        last_name,
+        email: data.email,
+        department: data.department,
+        joining_date: data.joining_date,
+        employee_id: data.employee_id,
+        position: data.position,
+        date_of_birth: data.date_of_birth,
+        employment_type: data.employment_type,
+        phone: data.phone,
+      };
 
       await apiClient.createEmployee(employeeData);
 
-      // Refresh employee list
       const response = await apiClient.getEmployees();
       const refreshedData = Array.isArray(response.data)
         ? (response.data as unknown[])
@@ -230,21 +267,11 @@ export default function EmployeeList() {
         } as Employee;
       });
       setEmployees(refreshedEmployees);
-      setNewEmp({
-        employeeid: "",
-        name: "",
-        email: "",
-        phone: "",
-        dob: "",
-        department: "",
-        position: "",
-        type: "Full-time",
-        joinDate: "",
-      });
+      reset();
       setAddDialog(false);
       toast({
         title: "Success",
-        description: `${newEmp.name} has been added.`,
+        description: `${first_name} has been added.`,
       });
     } catch (error: unknown) {
       const errorMessage =
@@ -298,155 +325,180 @@ export default function EmployeeList() {
               <DialogHeader>
                 <DialogTitle>Add New Employee</DialogTitle>
               </DialogHeader>
-              <div className="space-y-4 pt-2">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs text-muted-foreground mb-1 block">
-                      Employee id
-                    </label>
-                    <Input
-                      value={newEmp.employeeid}
-                      onChange={(e) =>
-                        setNewEmp({ ...newEmp, employeeid: e.target.value })
-                      }
-                      placeholder="EMP001"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-muted-foreground mb-1 block">
-                      Full Name *
-                    </label>
-                    <Input
-                      value={newEmp.name}
-                      onChange={(e) =>
-                        setNewEmp({ ...newEmp, name: e.target.value })
-                      }
-                      placeholder="Enter full name"
-                      className="h-9 text-sm"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-xs text-muted-foreground mb-1 block">
-                      Email *
-                    </label>
-                    <Input
-                      value={newEmp.email}
-                      onChange={(e) =>
-                        setNewEmp({ ...newEmp, email: e.target.value })
-                      }
-                      placeholder="email@company.com"
-                      type="email"
-                      className="h-9 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-muted-foreground mb-1 block">
-                      Phone
-                    </label>
-                    <Input
-                      value={newEmp.phone}
-                      onChange={(e) =>
-                        setNewEmp({ ...newEmp, phone: e.target.value })
-                      }
-                      placeholder="+977-98XXXXXXXX"
-                      className="h-9 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-muted-foreground mb-1 block">
-                      Date of Birth
-                    </label>
-                    <Input
-                      type="date"
-                      value={newEmp.dob}
-                      onChange={(e) =>
-                        setNewEmp({ ...newEmp, dob: e.target.value })
-                      }
-                      className="h-9 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-muted-foreground mb-1 block">
-                      Department *
-                    </label>
-                    <Select
-                      value={newEmp.department}
-                      onValueChange={(v) =>
-                        setNewEmp({ ...newEmp, department: v })
-                      }
-                    >
-                      <SelectTrigger className="h-9 text-sm">
-                        <SelectValue placeholder="Select" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {departments.map((d) => (
-                          <SelectItem key={d} value={d}>
-                            {d}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <label className="text-xs text-muted-foreground mb-1 block">
-                      Position
-                    </label>
-                    <Input
-                      value={newEmp.position}
-                      onChange={(e) =>
-                        setNewEmp({ ...newEmp, position: e.target.value })
-                      }
-                      placeholder="e.g., Sr. Developer"
-                      className="h-9 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-muted-foreground mb-1 block">
-                      Employment Type
-                    </label>
-                    <Select
-                      value={newEmp.type}
-                      onValueChange={(v) => setNewEmp({ ...newEmp, type: v })}
-                    >
-                      <SelectTrigger className="h-9 text-sm">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {types.map((t) => (
-                          <SelectItem key={t} value={t}>
-                            {t}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <label className="text-xs text-muted-foreground mb-1 block">
-                      Date of Joining
-                    </label>
-                    <Input
-                      type="date"
-                      value={newEmp.joinDate}
-                      onChange={(e) =>
-                        setNewEmp({ ...newEmp, joinDate: e.target.value })
-                      }
-                      className="h-9 text-sm"
-                    />
-                  </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">
+                    Employee ID *
+                  </label>
+                  <Input
+                    {...register("employee_id")}
+                    placeholder="EMP001"
+                    className="h-9 text-sm"
+                  />
+                  {errors.employee_id && (
+                    <p className="text-xs text-destructive mt-1">
+                      {errors.employee_id.message}
+                    </p>
+                  )}
                 </div>
-                <div className="flex justify-end gap-2 pt-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setAddDialog(false)}
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">
+                    Full Name *
+                  </label>
+                  <Input
+                    {...register("full_name")}
+                    placeholder="Enter full name"
+                    className="h-9 text-sm"
+                  />
+                  {errors.full_name && (
+                    <p className="text-xs text-destructive mt-1">
+                      {errors.full_name.message}
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">
+                    Email *
+                  </label>
+                  <Input
+                    {...register("email")}
+                    placeholder="email@company.com"
+                    type="email"
+                    className="h-9 text-sm"
+                  />
+                  {errors.email && (
+                    <p className="text-xs text-destructive mt-1">
+                      {errors.email.message}
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">
+                    Phone *
+                  </label>
+                  <Input
+                    {...register("phone")}
+                    placeholder="98XXXXXXXX"
+                    className="h-9 text-sm"
+                  />
+                  {errors.phone && (
+                    <p className="text-xs text-destructive mt-1">
+                      {errors.phone.message}
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">
+                    Date of Birth *
+                  </label>
+                  <Input
+                    type="date"
+                    {...register("date_of_birth")}
+                    className="h-9 text-sm"
+                  />
+                  {errors.date_of_birth && (
+                    <p className="text-xs text-destructive mt-1">
+                      {errors.date_of_birth.message}
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">
+                    Department *
+                  </label>
+                  <Select onValueChange={(v) => setValue("department", v)}>
+                    <SelectTrigger className="h-9 text-sm">
+                      <SelectValue placeholder="Select" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {departments.map((d) => (
+                        <SelectItem key={d} value={d}>
+                          {d}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {errors.department && (
+                    <p className="text-xs text-destructive mt-1">
+                      {errors.department.message}
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">
+                    Position *
+                  </label>
+                  <Input
+                    {...register("position")}
+                    placeholder="e.g., Sr. Developer"
+                    className="h-9 text-sm"
+                  />
+                  {errors.position && (
+                    <p className="text-xs text-destructive mt-1">
+                      {errors.position.message}
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">
+                    Employment Type *
+                  </label>
+                  <Select
+                    onValueChange={(v) =>
+                      setValue(
+                        "employment_type",
+                        v as "Full-time" | "Part-time" | "Contract-type",
+                      )
+                    }
                   >
-                    Cancel
-                  </Button>
-                  <Button size="sm" onClick={handleAddEmployee}>
-                    Add Employee
-                  </Button>
+                    <SelectTrigger className="h-9 text-sm">
+                      <SelectValue placeholder="Select type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {types.map((t) => (
+                        <SelectItem key={t} value={t}>
+                          {t}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {errors.employment_type && (
+                    <p className="text-xs text-destructive mt-1">
+                      {errors.employment_type.message}
+                    </p>
+                  )}
                 </div>
+                <div>
+                  {" "}
+                  <label className="text-xs text-muted-foreground mb-1 block">
+                    Date of Joining *
+                  </label>
+                  <Input
+                    type="date"
+                    {...register("joining_date")}
+                    className="h-9 text-sm"
+                  />
+                  {errors.joining_date && (
+                    <p className="text-xs text-destructive mt-1">
+                      {errors.joining_date.message}
+                    </p>
+                  )}
+                </div>
+              </div>{" "}
+              <div className="flex justify-end gap-2 pt-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    reset();
+                    setAddDialog(false);
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button size="sm" onClick={handleSubmit(handleAddEmployee)}>
+                  Add Employee
+                </Button>
               </div>
             </DialogContent>
           </Dialog>
@@ -531,8 +583,54 @@ export default function EmployeeList() {
           <table className="nexus-table">
             <thead>
               <tr>
-                <th>ID</th>
-                <th>Employee</th>
+                <th>
+                  <button
+                    className=" flex gap-3"
+                    onClick={() => {
+                      setSortEmployeeName(null);
+                      setSortEmployeeId((prev) =>
+                        prev === "asc"
+                          ? "desc"
+                          : prev === "desc"
+                            ? null
+                            : "asc",
+                      );
+                    }}
+                  >
+                    ASSET ID
+                    {sortEmployeeId === "asc" ? (
+                      <ArrowUp className="w-5 h-5 text-primary" />
+                    ) : sortEmployeeId === "desc" ? (
+                      <ArrowDown className="w-5 h-5 text-primary" />
+                    ) : (
+                      <ArrowUpDown className="w-4 h-5 text-muted-foreground" />
+                    )}
+                  </button>
+                </th>
+                <th>
+                  <button
+                    className="flex gap-3"
+                    onClick={() => {
+                      setSortEmployeeId(null);
+                      setSortEmployeeName((prev) =>
+                        prev === "asc"
+                          ? "desc"
+                          : prev === "desc"
+                            ? null
+                            : "asc",
+                      );
+                    }}
+                  >
+                    EMPLOYEE
+                    {sortEmployeeName === "asc" ? (
+                      <ArrowUp className="w-5 h-5 text-primary" />
+                    ) : sortEmployeeName === "desc" ? (
+                      <ArrowDown className="w-5 h-5 text-primary" />
+                    ) : (
+                      <ArrowUpDown className="w-4 h-5 text-muted-foreground" />
+                    )}
+                  </button>
+                </th>
                 <th>Department</th>
                 <th>Position</th>
                 <th>Email</th>
@@ -552,15 +650,23 @@ export default function EmployeeList() {
                   </td>
                   <td>
                     <div className="flex items-center gap-2.5">
-                      <div className="w-7 h-7 rounded-md bg-primary/10 flex items-center justify-center text-[10px] font-medium text-primary shrink-0">
-                        {(
-                          emp.name ||
-                          `${emp.first_name || ""} ${emp.last_name || ""}`.trim() ||
-                          "E"
-                        )
-                          .split(" ")
-                          .map((n) => n[0])
-                          .join("")}
+                      <div className="w-7 h-7 rounded-md bg-primary/10 flex items-center justify-center text-[10px] font-medium text-primary shrink-0 overflow-hidden">
+                        {emp.profile_image ? (
+                          <img
+                            src={emp.profile_image}
+                            alt={emp.name}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          (
+                            emp.name ||
+                            `${emp.first_name || ""} ${emp.last_name || ""}`.trim() ||
+                            "E"
+                          )
+                            .split(" ")
+                            .map((n) => n[0])
+                            .join("")
+                        )}
                       </div>
                       <div>
                         <p className="text-sm font-medium leading-none">
