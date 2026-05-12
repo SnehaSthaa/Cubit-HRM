@@ -26,6 +26,8 @@ export class AuthService {
 
     const token = this.generateToken(user);
 
+    console.log(user);
+
     return {
       user: this.sanitizeUser(user),
       token,

@@ -7,6 +7,11 @@ import {
 } from "../middleware/auth.js";
 import { uploadImage } from "@/middleware/upload.js";
 import { EmployeesAction } from "@/permissions/permission.js";
+import { validate } from "@/middleware/validate.js";
+import {
+  createEmployeeSchema,
+  updateEmployeeSchema,
+} from "../validator/employee.validator.js";
 
 const router = Router();
 
@@ -22,6 +27,7 @@ router.post(
   "/",
   authorize("super_admin", "hr_admin"),
   hasRequiredPermission([EmployeesAction.Create]),
+  validate(createEmployeeSchema),
   EmployeeController.create,
 );
 router.get(
@@ -34,6 +40,7 @@ router.put(
   "/:id",
   authorize("super_admin", "hr_admin"),
   hasRequiredPermission([EmployeesAction.Edit]),
+  validate(updateEmployeeSchema),
   EmployeeController.update,
 );
 router.delete(
@@ -50,8 +57,7 @@ router.patch(
 );
 router.post(
   "/:id/profile-image",
-  authenticate,
-  authorize("super_admin", "hr_admin"), // add role check
+  authorize("super_admin", "hr_admin"),
   hasRequiredPermission([EmployeesAction.Edit]),
   uploadImage.single("file"),
   EmployeeController.uploadProfileImage,

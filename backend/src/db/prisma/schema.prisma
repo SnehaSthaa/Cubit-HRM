@@ -24,62 +24,98 @@ model User {
 }
 
 model Employee {
-  id                   String    @id @default(uuid()) @db.Uuid
-  user_id              String    @unique @db.Uuid
-  employee_id          String    @unique
-  first_name           String
-  last_name            String
-  date_of_birth        DateTime? @db.Date
-  gender               String?
-  phone                String?
-  email                String    @unique
-  department           String
-  position             String?
-  joining_date         DateTime  @db.Date
-  salary               Decimal?  @db.Decimal(12, 2)
-  manager_id           String?   @db.Uuid
-  city                 String?
-  state                String?
-  postal_code          String?
-  notes                String?
-  created_at           DateTime  @default(now())
-  updated_at           DateTime  @updatedAt
-  account_number       String?
-  bank_name            String?
-  branch               String?
-  contract_type        String?
-  current_address      String?
-  employment_status    String    @default("Active")
-  employment_type      String    @default("Full-time")
-  father_name          String?
-  grandfather_name     String?
-  hierarchy            String?
-  level                String?
-  marital_status       String?
+  id          String @id @default(uuid()) @db.Uuid
+  user_id     String @unique @db.Uuid
+  employee_id String @unique
+
   profile_image        String?
-  mother_name          String?
-  permanent_address    String?
-  previous_experience  String?
-  citizenship_number   String?   @unique
-  nid_number           String?   @unique
-  pan_number           String?   @unique
-  ssid_number          String?   @unique
-  employee_verified    Boolean   @default(false)
-  verification_pending Boolean   @default(false)
+  employee_verified    Boolean  @default(false)
+  verification_pending Boolean  @default(false)
+  notes                String?
+  created_at           DateTime @default(now())
+  updated_at           DateTime @updatedAt
+
+  user             User            @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  personal_details PersonalDetail?
+  bank_details     BankDetail?
+
+  manager_id   String?    @db.Uuid
+  manager      Employee?  @relation("EmployeeManager", fields: [manager_id], references: [id])
+  subordinates Employee[] @relation("EmployeeManager")
 
   assets            Asset[]            @relation("AssetAssignee")
   attendance        Attendance[]
   emergencyContacts EmergencyContact[]
   documents         EmployeeDocument[]
-  manager           Employee?          @relation("EmployeeManager", fields: [manager_id], references: [id])
-  subordinates      Employee[]         @relation("EmployeeManager")
-  user              User               @relation(fields: [user_id], references: [id], onDelete: Cascade)
-
-  leaveBalances LeaveBalance[]
-  leaves        Leave[]
-  payroll       Payroll[]
+  leaveBalances     LeaveBalance[]
+  leaves            Leave[]
+  payroll           Payroll[]
+  department        Department[]
+  deviceMappings    DeviceMapping[]
 
   @@map("employees")
+}
+
+model Department {
+  id                  String   @id @default(uuid()) @db.Uuid
+  employee_id         String   @db.Uuid
+  department_name     String
+  hierarchy           String?
+  joining_date        DateTime @db.Date
+  previous_experience String?
+  employment_type     String?
+  employment_status   String?
+  designation         String?
+  level               String?
+
+  employee Employee @relation(fields: [employee_id], references: [id], onDelete: Cascade)
+
+  @@map("departments")
+}
+
+model PersonalDetail {
+  id                 String            @id @default(uuid()) @db.Uuid
+  employee_id        String            @unique @db.Uuid
+  first_name         String
+  last_name          String
+  email              String            @unique
+  phone              String            @unique
+  date_of_birth      DateTime?         @db.Date
+  gender             String?
+  marital_status     String?
+  citizenship_number String?           @unique
+  pan_number         String?           @unique
+  nid_number         String?           @unique
+  ssid_number        String?           @unique
+  father_name        String?
+  mother_name        String?
+  grandfather_name   String?
+  current_address    String?
+  permanent_address  String?
+  country            String?
+  state              String?
+  district           String?
+  city               String?
+  municipality       MunicipalityType?
+  ward               Int?
+  tole               String?
+
+  employee Employee @relation(fields: [employee_id], references: [id], onDelete: Cascade)
+
+  @@map("personal_details")
+}
+
+model BankDetail {
+  id             String   @id @default(uuid()) @db.Uuid
+  employee_id    String   @unique @db.Uuid
+  account_number String
+  salary         Decimal  @db.Decimal(12, 2)
+  bank_name      String
+  branch         String
+  contract_type  String?
+  employee       Employee @relation(fields: [employee_id], references: [id], onDelete: Cascade)
+
+  @@map("bank_details")
 }
 
 model EmergencyContact {
@@ -124,6 +160,36 @@ model Attendance {
 
   @@unique([employee_id, date])
   @@map("attendance")
+}
+
+model Device {
+  id           String   @id @default(uuid()) @db.Uuid
+  device_name  String
+  device_model String
+  ip           String   @unique
+  is_active    Boolean  @default(true)
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+
+  mappings DeviceMapping[]
+
+  @@map("devices")
+}
+
+model DeviceMapping {
+  id           String   @id @default(uuid()) @db.Uuid
+  employee_id  String   @db.Uuid
+  device_id    String   @db.Uuid
+  biometric_id String
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+
+  employee Employee @relation(fields: [employee_id], references: [id], onDelete: Cascade)
+  device   Device   @relation(fields: [device_id], references: [id], onDelete: Cascade)
+
+  @@unique([device_id, biometric_id])
+  @@unique([employee_id, device_id])
+  @@map("device_mappings")
 }
 
 model Leave {
@@ -231,20 +297,19 @@ model LeavePolicy {
 }
 
 model LeaveBalance {
-  id          String @id @default(uuid()) @db.Uuid
-  employee_id String @db.Uuid
-  year        Int
+  id            String   @id @default(uuid()) @db.Uuid
+  employee_id   String   @db.Uuid
+  year          Int
+  leave_type_id String   @db.Uuid
+  used          Int      @default(0)
+  remaining     Int      @default(0)
+  total         Int      @default(0)
+  leavePolicyId String?  @db.Uuid
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
 
-  leave_type_id String @db.Uuid
-
-  used          Int         @default(0)
-  remaining     Int         @default(0)
-  created_at    DateTime    @default(now())
-  updated_at    DateTime    @updatedAt
-  total         Int         @default(0)
-  leavePolicyId String?     @db.Uuid
-  employee      Employee    @relation(fields: [employee_id], references: [id], onDelete: Cascade)
-  leavePolicy   LeavePolicy @relation(fields: [leave_type_id], references: [id])
+  employee    Employee    @relation(fields: [employee_id], references: [id], onDelete: Cascade)
+  leavePolicy LeavePolicy @relation(fields: [leave_type_id], references: [id])
 
   @@unique([employee_id, year, leave_type_id])
   @@map("leave_balances")
@@ -295,4 +360,11 @@ enum HolidayType {
   company
   regional
   religious
+}
+
+enum MunicipalityType {
+  metropolitian
+  sub_metropolitian
+  municipality
+  rural_municipality
 }

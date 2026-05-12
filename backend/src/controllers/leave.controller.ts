@@ -14,10 +14,19 @@ export class LeaveController {
       if (employee_id) where.employee_id = employee_id;
       if (status) where.status = status;
 
+      // src/controllers/leave.controller.ts
+
+      // Inside the getAll method:
+      // backend/src/controllers/leave.controller.ts
+
       const leaves = await prisma.leave.findMany({
         where,
         include: {
-          employee: { include: { user: true } },
+          employee: {
+            include: {
+              user: true, // Names are likely here: user.name or user.first_name
+            },
+          },
           leaveType: true,
         },
         orderBy: { created_at: "desc" },

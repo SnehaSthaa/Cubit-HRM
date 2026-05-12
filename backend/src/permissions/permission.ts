@@ -36,6 +36,10 @@ export const AssetsAction = {
   Edit: "assets.edit",
   Delete: "assets.delete",
 } as const;
+export const BankDetailAction = {
+  View: "bankdetail.view",
+  Edit: "bankdetail.edit",
+} as const;
 export const OffboardingAction = {
   View: "offboarding.view",
   Create: "offboarding.create",
