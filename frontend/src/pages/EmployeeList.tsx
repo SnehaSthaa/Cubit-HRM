@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Search, Plus, Filter, MoreHorizontal, X, Trash2 } from "lucide-react";
+import { Search, Plus, Filter, MoreHorizontal, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,8 +26,15 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useRole } from "@/contexts/RoleContext";
 import { useToast } from "@/hooks/use-toast";
-import { apiClient, ApiResponse } from "@/services/apiClient";
+import { apiClient } from "@/services/apiClient";
 import { useAuth } from "@/contexts/AuthContext";
+import {
+  Employee,
+  EmployeeAPI,
+  CreateEmployeePayload,
+  getLatestDepartment,
+  normalizeEmployee,
+} from "@/types/index";
 
 const container = {
   hidden: { opacity: 0 },
@@ -42,49 +49,6 @@ const item = {
   },
 };
 
-type EmployeeStatus =
-  | "Active"
-  | "Onboarding"
-  | "On Leave"
-  | "Resigned"
-  | "Inactive"
-  | "Notice Period";
-interface Employee {
-  employee_id: string;
-  id: string;
-  name?: string;
-  first_name?: string;
-  last_name?: string;
-  email: string;
-  department: string;
-  profile_image: string;
-  position?: string;
-  joining_date?: string;
-  status?: EmployeeStatus;
-  type?: "Full-time" | "Contract" | "Part-time";
-}
-
-const statusClass: Record<EmployeeStatus, string> = {
-  Active: "status-active",
-  Onboarding: "status-pending",
-  "On Leave": "status-pending",
-  Resigned: "status-resigned",
-  Inactive: "status-inactive",
-  "Notice Period": "status-notice",
-};
-interface EmployeeAPI {
-  id: string;
-  employee_id: string;
-  first_name: string;
-  last_name: string;
-  email: string;
-  phone?: string;
-  department?: string;
-  profile_image?: string;
-  position?: string;
-  joining_date?: string;
-}
-
 const departments = [
   "Engineering",
   "Marketing",
@@ -94,14 +58,7 @@ const departments = [
   "Design",
   "Support",
 ];
-const statuses: EmployeeStatus[] = [
-  "Active",
-  "Onboarding",
-  "On Leave",
-  "Notice Period",
-  "Resigned",
-  "Inactive",
-];
+
 const types = ["Full-time", "Contract", "Part-time"];
 
 export default function EmployeeList() {
@@ -110,7 +67,6 @@ export default function EmployeeList() {
   const { user } = useAuth();
   const { toast } = useToast();
   const [search, setSearch] = useState("");
-
   const [filterDept, setFilterDept] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterType, setFilterType] = useState("all");
@@ -130,50 +86,38 @@ export default function EmployeeList() {
     joinDate: "",
   });
 
-  // Fetch employees from API
+  const fetchEmployees = async () => {
+    try {
+      const response = await apiClient.getEmployees();
+      const data = (response.data ?? []) as EmployeeAPI[];
+      setEmployees(data.map(normalizeEmployee));
+    } catch (error) {
+      console.error("Error fetching employees:", error);
+      setEmployees([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const fetchEmployees = async () => {
-      try {
-        const response = await apiClient.getEmployees();
-
-        const data = response.data ?? [];
-
-        const normalizedEmployees: Employee[] = (data as EmployeeAPI[]).map(
-          (emp) => ({
-            id: emp.id,
-            employee_id: emp.employee_id,
-            name: `${emp.first_name} ${emp.last_name}`.trim(),
-            profile_image: emp.profile_image,
-            email: emp.email,
-            department: emp.department ?? "—",
-            position: emp.position ?? "—",
-            joining_date: emp.joining_date ?? "",
-          }),
-        );
-
-        setEmployees(normalizedEmployees);
-      } catch (error) {
-        console.error("Error fetching employees:", error);
-        setEmployees([]);
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchEmployees();
   }, []);
 
   const filtered = employees.filter((e) => {
     const q = search.toLowerCase();
+    const latestDept = getLatestDepartment(e.department);
+    const deptName = latestDept?.department_name ?? "";
 
     const matchSearch =
       e.name?.toLowerCase().includes(q) ||
       e.id.toLowerCase().includes(q) ||
-      e.department?.toLowerCase().includes(q);
-    const matchDept = filterDept === "all" || e.department === filterDept;
-    const matchStatus = filterStatus === "all" || e.status === filterStatus;
+      deptName.toLowerCase().includes(q);
+
+    const matchDept = filterDept === "all" || deptName === filterDept;
+    const matchStatus = filterStatus === "all";
     const matchType =
-      filterType === "all" || (e.type ?? "Full-time") === filterType;
+      filterType === "all" ||
+      (latestDept?.employment_type ?? "Full-time") === filterType;
 
     return matchSearch && matchDept && matchStatus && matchType;
   });
@@ -188,48 +132,25 @@ export default function EmployeeList() {
     }
 
     try {
-      const employeeData: Record<string, unknown> = {
-        first_name: newEmp.name.split(" ")[0],
-        last_name: newEmp.name.split(" ").slice(1).join(" ") || "",
+      const [first_name, ...rest] = newEmp.name.trim().split(" ");
+
+      const employeeData: CreateEmployeePayload = {
+        first_name,
+        last_name: rest.join(" ") || "",
         email: newEmp.email,
-        department: newEmp.department,
-        joining_date: newEmp.joinDate || new Date().toISOString().split("T")[0],
+        department_name: newEmp.department,
+        joining_date:
+          newEmp.joinDate || new Date().toISOString().split("T")[0],
+        ...(newEmp.employeeid && { employee_id: newEmp.employeeid }),
+        ...(newEmp.phone && { phone: newEmp.phone }),
+        ...(newEmp.dob && { date_of_birth: newEmp.dob }),
+        ...(newEmp.position && { designation: newEmp.position }),
+        ...(newEmp.type && { employment_type: newEmp.type }),
       };
 
-      if (newEmp.employeeid) {
-        employeeData.employee_id = newEmp.employeeid;
-      }
-      if (newEmp.phone) {
-        employeeData.phone = newEmp.phone;
-      }
-      if (newEmp.dob) {
-        employeeData.date_of_birth = newEmp.dob;
-      }
-      if (newEmp.position) {
-        employeeData.position = newEmp.position;
-      }
-
       await apiClient.createEmployee(employeeData);
+      await fetchEmployees();
 
-      // Refresh employee list
-      const response = await apiClient.getEmployees();
-      const refreshedData = Array.isArray(response.data)
-        ? (response.data as unknown[])
-        : [];
-      const refreshedEmployees = refreshedData.map((emp) => {
-        const record = emp as Record<string, unknown>;
-        return {
-          ...record,
-          name:
-            (record.name as string) ||
-            `${(record.first_name as string) || ""} ${(record.last_name as string) || ""}`.trim(),
-          joining_date: record.joining_date
-            ? String(record.joining_date)
-            : undefined,
-          type: record.type as "Full-time" | "Contract" | "Part-time",
-        } as Employee;
-      });
-      setEmployees(refreshedEmployees);
       setNewEmp({
         employeeid: "",
         name: "",
@@ -247,11 +168,10 @@ export default function EmployeeList() {
         description: `${newEmp.name} has been added.`,
       });
     } catch (error: unknown) {
-      const errorMessage =
-        error instanceof Error ? error.message : "Failed to add employee";
       toast({
-        title: "Error",
-        description: errorMessage,
+        title: "Error here",
+        description:
+          error instanceof Error ? error.message : "Failed to add employee",
       });
     }
   };
@@ -262,11 +182,10 @@ export default function EmployeeList() {
       setEmployees((prev) => prev.filter((e) => e.id !== id));
       toast({ title: "Success", description: "Employee removed" });
     } catch (error: unknown) {
-      const errorMessage =
-        error instanceof Error ? error.message : "Failed to delete employee";
       toast({
         title: "Error",
-        description: errorMessage,
+        description:
+          error instanceof Error ? error.message : "Failed to delete employee",
       });
     }
   };
@@ -302,7 +221,7 @@ export default function EmployeeList() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs text-muted-foreground mb-1 block">
-                      Employee id
+                      Employee ID
                     </label>
                     <Input
                       value={newEmp.employeeid}
@@ -325,7 +244,6 @@ export default function EmployeeList() {
                       className="h-9 text-sm"
                     />
                   </div>
-
                   <div>
                     <label className="text-xs text-muted-foreground mb-1 block">
                       Email *
@@ -541,71 +459,71 @@ export default function EmployeeList() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((emp) => (
-                <tr
-                  key={emp.id}
-                  className="cursor-pointer"
-                  onClick={() => navigate(`/employees/${emp.id}`)}
-                >
-                  <td className="font-mono-data text-xs text-muted-foreground">
-                    {emp.employee_id}
-                  </td>
-                  <td>
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-7 h-7 rounded-md bg-primary/10 flex items-center justify-center text-[10px] font-medium text-primary shrink-0">
-                        {(
-                          emp.name ||
-                          `${emp.first_name || ""} ${emp.last_name || ""}`.trim() ||
-                          "E"
-                        )
-                          .split(" ")
-                          .map((n) => n[0])
-                          .join("")}
-                      </div>
-                      <div>
+              {filtered.map((emp) => {
+                const latestDept = getLatestDepartment(emp.department);
+                return (
+                  <tr
+                    key={emp.id}
+                    className="cursor-pointer"
+                    onClick={() => navigate(`/employees/${emp.id}`)}
+                  >
+                    <td className="font-mono-data text-xs text-muted-foreground">
+                      {emp.employee_id}
+                    </td>
+                    <td>
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-7 h-7 rounded-md bg-primary/10 flex items-center justify-center text-[10px] font-medium text-primary shrink-0">
+                          {(emp.name || "E")
+                            .split(" ")
+                            .map((n) => n[0])
+                            .join("")}
+                        </div>
                         <p className="text-sm font-medium leading-none">
-                          {emp.name ||
-                            `${emp.first_name || ""} ${emp.last_name || ""}`.trim()}
+                          {emp.name}
                         </p>
                       </div>
-                    </div>
-                  </td>
-                  <td className="text-sm">{emp.department || "—"}</td>
-                  <td className="text-sm text-muted-foreground">
-                    {emp.position || "—"}
-                  </td>
-                  <td className="text-sm text-muted-foreground">{emp.email}</td>
-                  <td className="font-mono-data text-xs text-muted-foreground">
-                    {emp.joining_date?.split("T")[0] || "—"}
-                  </td>
-                  <td onClick={(e) => e.stopPropagation()}>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <button className="p-1 rounded hover:bg-muted transition-colors">
-                          <MoreHorizontal className="w-4 h-4 text-muted-foreground" />
-                        </button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-44">
-                        <DropdownMenuItem
-                          onClick={() => navigate(`/employees/${emp.id}`)}
-                        >
-                          View Profile
-                        </DropdownMenuItem>
-                        <DropdownMenuItem>View Documents</DropdownMenuItem>
-                        <DropdownMenuItem>View Attendance</DropdownMenuItem>
-                        {isHR && (
+                    </td>
+                    <td className="text-sm">
+                      {latestDept?.department_name ?? "—"}
+                    </td>
+                    <td className="text-sm text-muted-foreground">
+                      {latestDept?.designation ?? "—"}
+                    </td>
+                    <td className="text-sm text-muted-foreground">
+                      {emp.email}
+                    </td>
+                    <td className="font-mono-data text-xs text-muted-foreground">
+                      {latestDept?.joining_date?.split("T")[0] ?? "—"}
+                    </td>
+                    <td onClick={(e) => e.stopPropagation()}>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button className="p-1 rounded hover:bg-muted transition-colors">
+                            <MoreHorizontal className="w-4 h-4 text-muted-foreground" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-44">
                           <DropdownMenuItem
-                            className="text-destructive"
-                            onClick={() => handleDeleteEmployee(emp.id)}
+                            onClick={() => navigate(`/employees/${emp.id}`)}
                           >
-                            Delete Employee
+                            View Profile
                           </DropdownMenuItem>
-                        )}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </td>
-                </tr>
-              ))}
+                          <DropdownMenuItem>View Documents</DropdownMenuItem>
+                          <DropdownMenuItem>View Attendance</DropdownMenuItem>
+                          {isHR && (
+                            <DropdownMenuItem
+                              className="text-destructive"
+                              onClick={() => handleDeleteEmployee(emp.id)}
+                            >
+                              Delete Employee
+                            </DropdownMenuItem>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </td>
+                  </tr>
+                );
+              })}
               {filtered.length === 0 && !loading && (
                 <tr>
                   <td

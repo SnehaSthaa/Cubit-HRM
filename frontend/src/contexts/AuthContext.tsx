@@ -15,6 +15,32 @@ export interface UserProfile {
   role: "super_admin" | "hr_admin" | "employee";
 }
 
+// ── Typed shapes for API responses ───────────────────────────────────────────
+interface AuthUserData {
+  id: string;
+  email: string;
+  name: string;
+  role: "super_admin" | "hr_admin" | "employee";
+}
+
+interface AuthResponseData {
+  user: AuthUserData;
+  token: string;
+}
+
+interface MeUserData {
+  id: string;
+  email: string;
+  name: string;
+  role: "super_admin" | "hr_admin" | "employee";
+}
+
+interface MeResponseData {
+  user: MeUserData;
+  employee?: unknown;
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 interface AuthContextValue {
   user: UserProfile | null;
   isAuthenticated: boolean;
@@ -41,18 +67,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const response = await apiClient.getMe();
 
           if (response.success && response.data) {
-            const { user } = response.data;
+            // FIX: cast data to the known shape so TS can see `user` on it.
+            const { user: userData } = response.data as MeResponseData;
 
             const profile: UserProfile = {
-              id: user.id,
-              email: user.email,
-              name: user.name,
-              role: user.role,
+              id: userData.id,
+              email: userData.email,
+              name: userData.name,
+              role: userData.role,
             };
 
             setUser(profile);
           }
-        } catch (error) {
+        } catch {
           localStorage.removeItem("access_token");
         }
       }
@@ -77,7 +104,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw new Error(response.message || "Login failed");
       }
 
-      const { user: userData, token } = response.data;
+      // FIX: cast data to AuthResponseData so `user` and `token` are visible.
+      const { user: userData, token } = response.data as AuthResponseData;
+
       const profile: UserProfile = {
         id: userData.id,
         email: userData.email,
@@ -102,7 +131,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw new Error(response.message || "Registration failed");
       }
 
-      const { user: userData, token } = response.data;
+      // FIX: same cast as login — register returns the same shape.
+      const { user: userData, token } = response.data as AuthResponseData;
+
       const profile: UserProfile = {
         id: userData.id,
         email: userData.email,
@@ -130,7 +161,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem("cubit-role");
   };
 
-  const forgotPassword = async (email: string) => {
+  const forgotPassword = async (_email: string) => {
     // TODO: Implement forgot password endpoint in backend
     throw new Error("Forgot password not yet implemented");
   };

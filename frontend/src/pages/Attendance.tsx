@@ -340,7 +340,7 @@ function diffHours(inT: string, outT: string): string {
   if (!HHMM_RE.test(inT) || !HHMM_RE.test(outT)) return "—";
   const [ih, im] = inT.split(":").map(Number);
   const [oh, om] = outT.split(":").map(Number);
-  let mins = oh * 60 + om - (ih * 60 + im);
+  const mins = oh * 60 + om - (ih * 60 + im);
   if (mins <= 0) return "—";
   return `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, "0")}m`;
 }
