@@ -1,7 +1,6 @@
 import { Request, Response } from "express";
-import { PrismaClient, AttendanceStatus } from "@prisma/client";
-
-const prisma = new PrismaClient();
+import { AttendanceStatus } from "@prisma/client";
+import { prisma } from "../db/prisma";
 
 export const getAttendances = async (req: Request, res: Response) => {
   try {
@@ -121,7 +120,7 @@ export const getAttendanceByEmployee = async (req: Request, res: Response) => {
 
     if (month && year) {
       const start = new Date(parseInt(year), parseInt(month) - 1, 1);
-      const end = new Date(parseInt(year), parseInt(month), 0); // last day of month
+      const end = new Date(parseInt(year), parseInt(month), 0);
       where.date = { gte: start, lte: end };
     }
 
@@ -335,12 +334,10 @@ export const getAttendanceSummary = async (req: Request, res: Response) => {
     const { from_date, to_date } = req.query as Record<string, string>;
 
     if (!from_date || !to_date) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "from_date and to_date are required",
-        });
+      return res.status(400).json({
+        success: false,
+        message: "from_date and to_date are required",
+      });
     }
 
     const records = await prisma.attendance.findMany({
@@ -401,7 +398,7 @@ export const getAttendanceSummary = async (req: Request, res: Response) => {
 
 export const checkIn = async (req: Request, res: Response) => {
   try {
-    const employee_id = (req as any).user?.employee_id; // from auth middleware
+    const employee_id = (req as any).user?.employee_id;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 

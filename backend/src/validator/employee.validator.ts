@@ -278,8 +278,6 @@ export const updateLeaveSchema = z.object({
   approved_by: uuidString.optional(),
 });
 
-// ─── Holiday ──────────────────────────────────────────────────────────────────
-
 const createHolidayBaseSchema = z.object({
   name: z.string().min(1, "Holiday name is required"),
   start_date: dateString,
@@ -293,8 +291,6 @@ export const createHolidaySchema = createHolidayBaseSchema.refine(
 );
 
 export const updateHolidaySchema = createHolidayBaseSchema.partial();
-
-// ─── Payroll ──────────────────────────────────────────────────────────────────
 
 export const createPayrollSchema = z.object({
   employee_id: uuidString,
@@ -311,8 +307,6 @@ export const createPayrollSchema = z.object({
 export const updatePayrollSchema = createPayrollSchema
   .omit({ employee_id: true, month: true, year: true })
   .partial();
-
-// ─── Asset ────────────────────────────────────────────────────────────────────
 
 export const createAssetSchema = z.object({
   asset_id: z.string().min(1, "Asset ID is required"),
@@ -332,8 +326,6 @@ export const createAssetSchema = z.object({
 export const updateAssetSchema = createAssetSchema
   .omit({ asset_id: true })
   .partial();
-
-// ─── Leave Policy ─────────────────────────────────────────────────────────────
 
 export const createLeavePolicySchema = z.object({
   name: z.string().min(1, "Policy name is required"),
@@ -357,8 +349,6 @@ export const createReportSchema = z.object({
   to_date: dateString.optional(),
   filters: z.record(z.string(), z.unknown()).optional(),
 });
-
-// ─── Inferred types ───────────────────────────────────────────────────────────
 
 export type CreateUserBody = z.infer<typeof createUserSchema>;
 export type UpdateUserBody = z.infer<typeof updateUserSchema>;
