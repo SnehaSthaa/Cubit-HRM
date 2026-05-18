@@ -7,8 +7,33 @@ import bcrypt from "bcrypt";
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter: new PrismaPg(pool) });
 
+const MANUAL_DEVICE_SERIAL = "MANUAL";
+
+async function ensureManualDevice(): Promise<string> {
+  const existing = await prisma.device.findUnique({
+    where: { serial_number: MANUAL_DEVICE_SERIAL },
+  });
+  if (existing) return existing.serial_number;
+
+  const created = await prisma.device.create({
+    data: {
+      serial_number: MANUAL_DEVICE_SERIAL,
+      device_name: "Manual Entry",
+      device_model: "N/A",
+      ip: "0.0.0.0",
+      is_active: false,
+    },
+  });
+  return created.serial_number;
+}
+
 async function main() {
   console.log("🌱 Seeding database...");
+
+  // =====================
+  // MANUAL DEVICE (sentinel — required by Attendance.deviceId FK)
+  // =====================
+  const deviceSerial = await ensureManualDevice();
 
   // =====================
   // LEAVE POLICY
@@ -204,6 +229,7 @@ async function main() {
 
   // =====================
   // ATTENDANCE
+  // deviceId is required (FK -> Device.serial_number) — use the MANUAL sentinel
   // =====================
   await prisma.attendance.createMany({
     data: [
@@ -211,21 +237,25 @@ async function main() {
         employee_id: employee.id,
         date: new Date("2024-04-01"),
         status: "present",
+        deviceId: deviceSerial,
       },
       {
         employee_id: employee.id,
         date: new Date("2024-04-02"),
         status: "present",
+        deviceId: deviceSerial,
       },
       {
         employee_id: employee.id,
         date: new Date("2024-04-03"),
         status: "late",
+        deviceId: deviceSerial,
       },
       {
         employee_id: employee.id,
         date: new Date("2024-04-04"),
         status: "absent",
+        deviceId: deviceSerial,
       },
     ],
     skipDuplicates: true,

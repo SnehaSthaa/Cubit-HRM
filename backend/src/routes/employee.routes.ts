@@ -17,12 +17,15 @@ const router = Router();
 
 router.use(authenticate);
 
+// ── Collection routes ─────────────────────────────────────────────────────
+
 router.get(
   "/",
   authorize("hr_admin", "super_admin", "employee"),
   hasRequiredPermission([EmployeesAction.View]),
   EmployeeController.getAll,
 );
+
 router.post(
   "/",
   authorize("super_admin", "hr_admin"),
@@ -30,12 +33,25 @@ router.post(
   validate(createEmployeeSchema),
   EmployeeController.create,
 );
+
+// ── Utility / admin routes (must come BEFORE /:id to avoid param conflicts) ──
+
+router.post(
+  "/cleanup-departments",
+  authorize("super_admin"),
+  hasRequiredPermission([EmployeesAction.Delete]),
+  EmployeeController.cleanupDuplicateDepartments,
+);
+
+// ── Single-resource routes ────────────────────────────────────────────────
+
 router.get(
   "/:id",
-  authorize("super_admin", "hr_admin"),
+  authorize("super_admin", "hr_admin", "employee"),
   hasRequiredPermission([EmployeesAction.View]),
   EmployeeController.getById,
 );
+
 router.put(
   "/:id",
   authorize("super_admin", "hr_admin"),
@@ -43,18 +59,31 @@ router.put(
   validate(updateEmployeeSchema),
   EmployeeController.update,
 );
+
+router.patch(
+  "/:id",
+  authorize("super_admin", "hr_admin"),
+  hasRequiredPermission([EmployeesAction.Edit]),
+  validate(updateEmployeeSchema),
+  EmployeeController.update,
+);
+
 router.delete(
   "/:id",
   authorize("super_admin"),
   hasRequiredPermission([EmployeesAction.Delete]),
   EmployeeController.delete,
 );
+
+// ── Sub-resource routes ───────────────────────────────────────────────────
+
 router.patch(
   "/:id/verify",
   authorize("super_admin", "hr_admin"),
   hasRequiredPermission([EmployeesAction.Edit]),
   EmployeeController.verifyEmployee,
 );
+
 router.post(
   "/:id/profile-image",
   authorize("super_admin", "hr_admin"),

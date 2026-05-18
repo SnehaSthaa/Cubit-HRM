@@ -12,7 +12,8 @@ import employeeEmergencyRoutes from "./employee.emergency.routes.js";
 import userRoutes from "./user.routes.js";
 import personalDetailRoutes from "./personal.details.js";
 import bankDetailRoutes from "./bank.details.routes.js";
-import attendanceMappingRoutes from "./attendance.mapping.routes.js";
+import deviceRouter from "./device.routes.js";
+
 const router = Router();
 
 router.use("/api/auth", authRoutes);
@@ -28,7 +29,7 @@ router.use("/api/employee-documents", employeeDocumentRoutes);
 router.use("/api/employees", employeeEmergencyRoutes);
 router.use("/api/employees", personalDetailRoutes);
 router.use("/api/employees", bankDetailRoutes);
-router.use("/api/ attendanceMappingRoutes", attendanceMappingRoutes);
+router.use("/api/devices", deviceRouter);
 
 router.get("/api/health", (req, res) => {
   res.json({ success: true, message: "Server is running" });

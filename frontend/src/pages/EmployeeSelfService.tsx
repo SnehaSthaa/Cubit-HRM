@@ -272,40 +272,38 @@ export default function EmployeeSelfService() {
 
   // ── ADDED BACK: was accidentally removed ──────────────────────────────────
   const handleSaveProfile = async () => {
-    if (!employee?.id) return;
-    if (!profileForm.first_name || !profileForm.last_name || !profileForm.email) {
-      toast({ title: "First name, last name and email are required", variant: "destructive" });
-      return;
-    }
-    try {
-      setSaving(true);
-      // Wrap in personal_details so the backend routes it to the right sub-table
-      await apiClient.updateEmployee(employee.id, { personal_details: profileForm });
-      setEmployee((prev) =>
-        prev ? {
-          ...prev,
-          personal_details: {
-            ...prev.personal_details,
-            ...profileForm,
-            id: prev.personal_details?.id ?? "",
-            employee_id: employee.id,
-          },
-        } : prev
-      );
-      setEditing(false);
-      markChanged("profile");
-      toast({ title: "Profile updated", description: "Awaiting HR verification." });
-    } catch (err) {
-      toast({ title: "Failed to save profile", description: errMsg(err), variant: "destructive" });
-    } finally { setSaving(false); }
-  };
+  if (!employee?.id) return;
+  if (!profileForm.first_name || !profileForm.last_name || !profileForm.email) {
+    toast({ title: "First name, last name and email are required", variant: "destructive" });
+    return;
+  }
+  try {
+    setSaving(true);
+    // Use the dedicated personal-details endpoint, not updateEmployee
+await apiClient.updatePersonalDetails(employee.id, profileForm as unknown as Record<string, unknown>);    setEmployee((prev) =>
+      prev ? {
+        ...prev,
+        personal_details: {
+          ...prev.personal_details,
+          ...profileForm,
+          id: prev.personal_details?.id ?? "",
+          employee_id: employee.id,
+        },
+      } : prev
+    );
+    setEditing(false);
+    markChanged("profile");
+    toast({ title: "Profile updated", description: "Awaiting HR verification." });
+  } catch (err) {
+    toast({ title: "Failed to save profile", description: errMsg(err), variant: "destructive" });
+  } finally { setSaving(false); }
+};
 
   const handleSaveBank = async () => {
     if (!employee?.id) return;
     try {
       setSaving(true);
-      await apiClient.updateEmployee(employee.id, { bank_details: bankDraft });
-      setBankCommitted({ ...bankDraft });
+await apiClient.upsertBankDetails(employee.id, bankDraft as unknown as Record<string, unknown>);      setBankCommitted({ ...bankDraft });
       setEmployee((prev) =>
         prev ? { ...prev, bank_details: { ...prev.bank_details, ...bankDraft, id: prev.bank_details?.id ?? "", employee_id: employee.id } } : prev
       );

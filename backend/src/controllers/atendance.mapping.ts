@@ -1,6 +1,34 @@
 import { Request, Response } from "express";
 import { AttendanceStatus } from "@prisma/client";
-import { prisma } from "../db/prisma";
+import { prisma } from "../db/prisma.js";
+
+// ─── Reusable include ────────────────────────────────────────────────────────
+
+const attendanceInclude = {
+  employee: {
+    include: {
+      personal_details: {
+        select: {
+          first_name: true,
+          last_name: true,
+          email: true,
+          phone: true,
+        },
+      },
+    },
+  },
+  device: {
+    select: {
+      serial_number: true,
+      device_name: true,
+      device_model: true,
+      location: true,
+      is_active: true,
+    },
+  },
+} as const;
+
+// ─── GET /attendances ────────────────────────────────────────────────────────
 
 export const getAttendances = async (req: Request, res: Response) => {
   try {
@@ -36,15 +64,7 @@ export const getAttendances = async (req: Request, res: Response) => {
         skip,
         take,
         orderBy: { date: "desc" },
-        include: {
-          employee: {
-            include: {
-              personal_details: {
-                select: { first_name: true, last_name: true, email: true },
-              },
-            },
-          },
-        },
+        include: attendanceInclude,
       }),
       prisma.attendance.count({ where }),
     ]);
@@ -66,26 +86,15 @@ export const getAttendances = async (req: Request, res: Response) => {
   }
 };
 
+// ─── GET /attendances/:id ────────────────────────────────────────────────────
+
 export const getAttendanceById = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 
     const record = await prisma.attendance.findUnique({
       where: { id },
-      include: {
-        employee: {
-          include: {
-            personal_details: {
-              select: {
-                first_name: true,
-                last_name: true,
-                email: true,
-                phone: true,
-              },
-            },
-          },
-        },
-      },
+      include: attendanceInclude,
     });
 
     if (!record) {
@@ -101,6 +110,8 @@ export const getAttendanceById = async (req: Request, res: Response) => {
       .json({ success: false, message: "Internal server error", error });
   }
 };
+
+// ─── GET /attendances/employee/:employee_id ──────────────────────────────────
 
 export const getAttendanceByEmployee = async (req: Request, res: Response) => {
   try {
@@ -127,6 +138,7 @@ export const getAttendanceByEmployee = async (req: Request, res: Response) => {
     const records = await prisma.attendance.findMany({
       where,
       orderBy: { date: "asc" },
+      include: attendanceInclude,
     });
 
     const summary = records.reduce(
@@ -150,17 +162,29 @@ export const getAttendanceByEmployee = async (req: Request, res: Response) => {
   }
 };
 
+// ─── POST /attendances ───────────────────────────────────────────────────────
+
 export const createAttendance = async (req: Request, res: Response) => {
   try {
-    const { employee_id, date, check_in, check_out, status, notes } = req.body;
+    const {
+      employee_id,
+      date,
+      check_in,
+      check_out,
+      status,
+      notes,
+      device_id, // serial_number of the device
+      biometric_id,
+    } = req.body;
 
-    if (!employee_id || !date || !status) {
+    if (!employee_id || !date || !status || !device_id) {
       return res.status(400).json({
         success: false,
-        message: "employee_id, date, and status are required",
+        message: "employee_id, date, status, and device_id are required",
       });
     }
 
+    // Validate employee
     const employee = await prisma.employee.findUnique({
       where: { id: employee_id },
     });
@@ -168,6 +192,21 @@ export const createAttendance = async (req: Request, res: Response) => {
       return res
         .status(404)
         .json({ success: false, message: "Employee not found" });
+    }
+
+    // Validate device by serial_number (schema FK references serial_number)
+    const device = await prisma.device.findUnique({
+      where: { serial_number: device_id },
+    });
+    if (!device) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Device not found" });
+    }
+    if (!device.is_active) {
+      return res
+        .status(403)
+        .json({ success: false, message: "Device is inactive" });
     }
 
     const record = await prisma.attendance.create({
@@ -178,14 +217,10 @@ export const createAttendance = async (req: Request, res: Response) => {
         check_out: check_out ? new Date(`1970-01-01T${check_out}`) : null,
         status: status as AttendanceStatus,
         notes,
+        deviceId: device_id,
+        biometric_id: biometric_id ?? null, // note: typo kept as-is from schema
       },
-      include: {
-        employee: {
-          include: {
-            personal_details: { select: { first_name: true, last_name: true } },
-          },
-        },
-      },
+      include: attendanceInclude,
     });
 
     return res.status(201).json({ success: true, data: record });
@@ -203,6 +238,8 @@ export const createAttendance = async (req: Request, res: Response) => {
   }
 };
 
+// ─── POST /attendances/bulk ──────────────────────────────────────────────────
+
 export const bulkCreateAttendance = async (req: Request, res: Response) => {
   try {
     const { records } = req.body as {
@@ -213,6 +250,8 @@ export const bulkCreateAttendance = async (req: Request, res: Response) => {
         check_out?: string;
         status: AttendanceStatus;
         notes?: string;
+        device_id: string; // serial_number
+        biometric_id?: string;
       }[];
     };
 
@@ -220,6 +259,50 @@ export const bulkCreateAttendance = async (req: Request, res: Response) => {
       return res
         .status(400)
         .json({ success: false, message: "records array is required" });
+    }
+
+    // Pre-validate all device serial_numbers in one query
+    const uniqueDeviceIds = [...new Set(records.map((r) => r.device_id))];
+    const devices = await prisma.device.findMany({
+      where: { serial_number: { in: uniqueDeviceIds } },
+      select: { serial_number: true, is_active: true },
+    });
+
+    const deviceMap = new Map(devices.map((d) => [d.serial_number, d]));
+
+    const missingDevices = uniqueDeviceIds.filter((id) => !deviceMap.has(id));
+    if (missingDevices.length > 0) {
+      return res.status(404).json({
+        success: false,
+        message: `Devices not found: ${missingDevices.join(", ")}`,
+      });
+    }
+
+    const inactiveDevices = uniqueDeviceIds.filter(
+      (id) => !deviceMap.get(id)?.is_active,
+    );
+    if (inactiveDevices.length > 0) {
+      return res.status(403).json({
+        success: false,
+        message: `Inactive devices: ${inactiveDevices.join(", ")}`,
+      });
+    }
+
+    // Pre-validate all employee_ids in one query
+    const uniqueEmployeeIds = [...new Set(records.map((r) => r.employee_id))];
+    const employees = await prisma.employee.findMany({
+      where: { id: { in: uniqueEmployeeIds } },
+      select: { id: true },
+    });
+    const foundEmployeeIds = new Set(employees.map((e) => e.id));
+    const missingEmployees = uniqueEmployeeIds.filter(
+      (id) => !foundEmployeeIds.has(id),
+    );
+    if (missingEmployees.length > 0) {
+      return res.status(404).json({
+        success: false,
+        message: `Employees not found: ${missingEmployees.join(", ")}`,
+      });
     }
 
     const created = await prisma.$transaction(
@@ -238,6 +321,8 @@ export const bulkCreateAttendance = async (req: Request, res: Response) => {
               : null,
             status: r.status,
             notes: r.notes,
+            deviceId: r.device_id,
+            biometric_id: r.biometric_id ?? null,
           },
           create: {
             employee_id: r.employee_id,
@@ -248,6 +333,8 @@ export const bulkCreateAttendance = async (req: Request, res: Response) => {
               : null,
             status: r.status,
             notes: r.notes,
+            deviceId: r.device_id,
+            biometric_id: r.biometric_id ?? null,
           },
         }),
       ),
@@ -265,16 +352,36 @@ export const bulkCreateAttendance = async (req: Request, res: Response) => {
   }
 };
 
+// ─── PATCH /attendances/:id ──────────────────────────────────────────────────
+
 export const updateAttendance = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { check_in, check_out, status, notes } = req.body;
+    const { check_in, check_out, status, notes, device_id, biometric_id } =
+      req.body;
 
     const existing = await prisma.attendance.findUnique({ where: { id } });
     if (!existing) {
       return res
         .status(404)
         .json({ success: false, message: "Attendance record not found" });
+    }
+
+    // Validate new device if provided
+    if (device_id) {
+      const device = await prisma.device.findUnique({
+        where: { serial_number: device_id },
+      });
+      if (!device) {
+        return res
+          .status(404)
+          .json({ success: false, message: "Device not found" });
+      }
+      if (!device.is_active) {
+        return res
+          .status(403)
+          .json({ success: false, message: "Device is inactive" });
+      }
     }
 
     const updated = await prisma.attendance.update({
@@ -288,14 +395,10 @@ export const updateAttendance = async (req: Request, res: Response) => {
         }),
         ...(status && { status: status as AttendanceStatus }),
         ...(notes !== undefined && { notes }),
+        ...(device_id && { deviceId: device_id }),
+        ...(biometric_id !== undefined && { biometric_id: biometric_id }),
       },
-      include: {
-        employee: {
-          include: {
-            personal_details: { select: { first_name: true, last_name: true } },
-          },
-        },
-      },
+      include: attendanceInclude,
     });
 
     return res.status(200).json({ success: true, data: updated });
@@ -305,6 +408,8 @@ export const updateAttendance = async (req: Request, res: Response) => {
       .json({ success: false, message: "Internal server error", error });
   }
 };
+
+// ─── DELETE /attendances/:id ─────────────────────────────────────────────────
 
 export const deleteAttendance = async (req: Request, res: Response) => {
   try {
@@ -329,6 +434,8 @@ export const deleteAttendance = async (req: Request, res: Response) => {
   }
 };
 
+// ─── GET /attendances/summary ────────────────────────────────────────────────
+
 export const getAttendanceSummary = async (req: Request, res: Response) => {
   try {
     const { from_date, to_date } = req.query as Record<string, string>;
@@ -347,24 +454,15 @@ export const getAttendanceSummary = async (req: Request, res: Response) => {
       include: {
         employee: {
           include: {
-            personal_details: { select: { first_name: true, last_name: true } },
+            personal_details: {
+              select: { first_name: true, last_name: true, email: true },
+            },
           },
         },
       },
     });
 
-    const summaryMap = new Map<
-      string,
-      {
-        employee: any;
-        present: number;
-        absent: number;
-        late: number;
-        half_day: number;
-        on_leave: number;
-        total: number;
-      }
-    >();
+    const summaryMap = new Map();
 
     for (const r of records) {
       if (!summaryMap.has(r.employee_id)) {
@@ -396,9 +494,45 @@ export const getAttendanceSummary = async (req: Request, res: Response) => {
   }
 };
 
+// ─── POST /attendances/check-in ──────────────────────────────────────────────
+
 export const checkIn = async (req: Request, res: Response) => {
   try {
     const employee_id = (req as any).user?.employee_id;
+    const { device_id, biometric_id } = req.body;
+
+    if (!device_id) {
+      return res
+        .status(400)
+        .json({ success: false, message: "device_id is required" });
+    }
+
+    // Validate device
+    const device = await prisma.device.findUnique({
+      where: { serial_number: device_id },
+    });
+    if (!device) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Device not found" });
+    }
+    if (!device.is_active) {
+      return res
+        .status(403)
+        .json({ success: false, message: "Device is inactive" });
+    }
+
+    // Validate device mapping for this employee
+    const mapping = await prisma.deviceMapping.findFirst({
+      where: { employee_id, device: { serial_number: device_id } },
+    });
+    if (!mapping) {
+      return res.status(403).json({
+        success: false,
+        message: "Employee is not mapped to this device",
+      });
+    }
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -414,17 +548,30 @@ export const checkIn = async (req: Request, res: Response) => {
 
     const now = new Date();
     const checkInTime = new Date(
-      `1970-01-01T${now.toTimeString().slice(0, 8)}`,
+      Date.UTC(1970, 0, 1, now.getHours(), now.getMinutes(), now.getSeconds()),
     );
 
-    const lateThreshold = new Date("1970-01-01T09:30:00");
+    const lateThreshold = new Date("1970-01-01T09:30:00.000Z");
     const status: AttendanceStatus =
       checkInTime > lateThreshold ? "late" : "present";
 
     const record = await prisma.attendance.upsert({
       where: { employee_id_date: { employee_id, date: today } },
-      update: { check_in: checkInTime, status },
-      create: { employee_id, date: today, check_in: checkInTime, status },
+      update: {
+        check_in: checkInTime,
+        status,
+        deviceId: device_id,
+        biometric_id: biometric_id ?? mapping.biometric_id,
+      },
+      create: {
+        employee_id,
+        date: today,
+        check_in: checkInTime,
+        status,
+        deviceId: device_id,
+        biometric_id: biometric_id ?? mapping.biometric_id,
+      },
+      include: attendanceInclude,
     });
 
     return res.status(200).json({ success: true, data: record });
@@ -435,9 +582,12 @@ export const checkIn = async (req: Request, res: Response) => {
   }
 };
 
+// ─── POST /attendances/check-out ─────────────────────────────────────────────
+
 export const checkOut = async (req: Request, res: Response) => {
   try {
     const employee_id = (req as any).user?.employee_id;
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -464,6 +614,7 @@ export const checkOut = async (req: Request, res: Response) => {
     const updated = await prisma.attendance.update({
       where: { id: existing.id },
       data: { check_out: checkOutTime },
+      include: attendanceInclude,
     });
 
     return res.status(200).json({ success: true, data: updated });

@@ -10,7 +10,7 @@ import {
   getAttendanceSummary,
   checkIn,
   checkOut,
-} from "../controllers/atendance.mapping";
+} from "../controllers/atendance.mapping.js";
 
 const router = Router();
 

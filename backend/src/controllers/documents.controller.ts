@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { prisma } from "../db/prisma";
+import { prisma } from "../db/prisma.js";
 import { ApiResponse } from "../types/index.js";
 import { minioClient, MINIO_BASE_URL, ensureBucket } from "@/utils/minio.js";
 

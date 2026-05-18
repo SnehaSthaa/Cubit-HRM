@@ -426,9 +426,13 @@ export class LeaveController {
           employee: {
             select: {
               id: true,
-              first_name: true,
-              last_name: true,
               department: true,
+              personal_details: {
+                select: {
+                  first_name: true,
+                  last_name: true,
+                },
+              },
             },
           },
           leavePolicy: true,

@@ -7,51 +7,46 @@ datasource db {
 }
 
 model User {
-  id            String @id @default(uuid()) @db.Uuid
-  email         String @unique
+  id            String    @id @default(uuid()) @db.Uuid
+  email         String    @unique
   password_hash String
-
-  name       String
-  phone      String?
-  role       UserRole
-  is_active  Boolean   @default(true)
-  created_at DateTime  @default(now())
-  updated_at DateTime  @updatedAt
-  employee   Employee?
-  reports    Report[]
+  name          String
+  phone         String?
+  role          UserRole
+  is_active     Boolean   @default(true)
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @updatedAt
+  employee      Employee?
+  reports       Report[]
 
   @@map("users")
 }
 
 model Employee {
-  id          String @id @default(uuid()) @db.Uuid
-  user_id     String @unique @db.Uuid
-  employee_id String @unique
-
-  profile_image        String?
-  employee_verified    Boolean  @default(false)
-  verification_pending Boolean  @default(false)
+  id                   String             @id @default(uuid()) @db.Uuid
+  user_id              String             @unique @db.Uuid
+  employee_id          String             @unique
+  manager_id           String?            @db.Uuid
   notes                String?
-  created_at           DateTime @default(now())
-  updated_at           DateTime @updatedAt
-
-  user             User            @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  personal_details PersonalDetail?
-  bank_details     BankDetail?
-
-  manager_id   String?    @db.Uuid
-  manager      Employee?  @relation("EmployeeManager", fields: [manager_id], references: [id])
-  subordinates Employee[] @relation("EmployeeManager")
-
-  assets            Asset[]            @relation("AssetAssignee")
-  attendance        Attendance[]
-  emergencyContacts EmergencyContact[]
-  documents         EmployeeDocument[]
-  leaveBalances     LeaveBalance[]
-  leaves            Leave[]
-  payroll           Payroll[]
-  department        Department[]
-  deviceMappings    DeviceMapping[]
+  created_at           DateTime           @default(now())
+  updated_at           DateTime           @updatedAt
+  employee_verified    Boolean            @default(false)
+  profile_image        String?
+  verification_pending Boolean            @default(false)
+  assets               Asset[]            @relation("AssetAssignee")
+  attendance           Attendance[]
+  bank_details         BankDetail?
+  department           Department[]
+  deviceMappings       DeviceMapping[]
+  emergencyContacts    EmergencyContact[]
+  documents            EmployeeDocument[]
+  manager              Employee?          @relation("EmployeeManager", fields: [manager_id], references: [id])
+  subordinates         Employee[]         @relation("EmployeeManager")
+  user                 User               @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  leaveBalances        LeaveBalance[]
+  leaves               Leave[]
+  payroll              Payroll[]
+  personal_details     PersonalDetail?
 
   @@map("employees")
 }
@@ -67,8 +62,7 @@ model Department {
   employment_status   String?
   designation         String?
   level               String?
-
-  employee Employee @relation(fields: [employee_id], references: [id], onDelete: Cascade)
+  employee            Employee @relation(fields: [employee_id], references: [id], onDelete: Cascade)
 
   @@map("departments")
 }
@@ -79,7 +73,7 @@ model PersonalDetail {
   first_name         String
   last_name          String
   email              String            @unique
-  phone              String            @unique
+  phone              String?           @unique
   date_of_birth      DateTime?         @db.Date
   gender             String?
   marital_status     String?
@@ -99,8 +93,7 @@ model PersonalDetail {
   municipality       MunicipalityType?
   ward               Int?
   tole               String?
-
-  employee Employee @relation(fields: [employee_id], references: [id], onDelete: Cascade)
+  employee           Employee          @relation(fields: [employee_id], references: [id], onDelete: Cascade)
 
   @@map("personal_details")
 }
@@ -147,31 +140,36 @@ model EmployeeDocument {
 }
 
 model Attendance {
-  id          String           @id @default(uuid()) @db.Uuid
-  employee_id String           @db.Uuid
-  date        DateTime         @db.Date
-  check_in    DateTime?        @db.Time(6)
-  check_out   DateTime?        @db.Time(6)
-  status      AttendanceStatus
-  notes       String?
-  created_at  DateTime         @default(now())
-  updated_at  DateTime         @updatedAt
-  employee    Employee         @relation(fields: [employee_id], references: [id], onDelete: Cascade)
+  id           String           @id @default(uuid()) @db.Uuid
+  employee_id  String           @db.Uuid
+  date         DateTime         @db.Date
+  status       AttendanceStatus
+  notes        String?
+  created_at   DateTime         @default(now())
+  updated_at   DateTime         @updatedAt
+  deviceId     String?
+  check_in     DateTime?
+  check_out    DateTime?
+  biometric_id String?
+  device       Device?          @relation(fields: [deviceId], references: [serial_number])
+  employee     Employee         @relation(fields: [employee_id], references: [id], onDelete: Cascade)
 
   @@unique([employee_id, date])
   @@map("attendance")
 }
 
 model Device {
-  id           String   @id @default(uuid()) @db.Uuid
-  device_name  String
-  device_model String
-  ip           String   @unique
-  is_active    Boolean  @default(true)
-  created_at   DateTime @default(now())
-  updated_at   DateTime @updatedAt
-
-  mappings DeviceMapping[]
+  id            String          @id @default(uuid()) @db.Uuid
+  serial_number String          @unique
+  location      String?
+  device_name   String
+  device_model  String
+  ip            String          @unique
+  is_active     Boolean         @default(true)
+  created_at    DateTime        @default(now())
+  updated_at    DateTime        @updatedAt
+  attendances   Attendance[]
+  mappings      DeviceMapping[]
 
   @@map("devices")
 }
@@ -183,9 +181,8 @@ model DeviceMapping {
   biometric_id String
   created_at   DateTime @default(now())
   updated_at   DateTime @updatedAt
-
-  employee Employee @relation(fields: [employee_id], references: [id], onDelete: Cascade)
-  device   Device   @relation(fields: [device_id], references: [id], onDelete: Cascade)
+  device       Device   @relation(fields: [device_id], references: [id], onDelete: Cascade)
+  employee     Employee @relation(fields: [employee_id], references: [id], onDelete: Cascade)
 
   @@unique([device_id, biometric_id])
   @@unique([employee_id, device_id])
@@ -197,7 +194,6 @@ model Leave {
   employee_id    String      @db.Uuid
   start_date     DateTime    @db.Date
   end_date       DateTime    @db.Date
-  leave_type_id  String      @db.Uuid
   days_count     Int
   reason         String?
   status         LeaveStatus @default(pending)
@@ -205,6 +201,7 @@ model Leave {
   approval_notes String?
   created_at     DateTime    @default(now())
   updated_at     DateTime    @updatedAt
+  leave_type_id  String      @db.Uuid
   employee       Employee    @relation(fields: [employee_id], references: [id], onDelete: Cascade)
   leaveType      LeavePolicy @relation(fields: [leave_type_id], references: [id])
 
@@ -297,19 +294,18 @@ model LeavePolicy {
 }
 
 model LeaveBalance {
-  id            String   @id @default(uuid()) @db.Uuid
-  employee_id   String   @db.Uuid
+  id            String      @id @default(uuid()) @db.Uuid
+  employee_id   String      @db.Uuid
   year          Int
-  leave_type_id String   @db.Uuid
-  used          Int      @default(0)
-  remaining     Int      @default(0)
-  total         Int      @default(0)
-  leavePolicyId String?  @db.Uuid
-  created_at    DateTime @default(now())
-  updated_at    DateTime @updatedAt
-
-  employee    Employee    @relation(fields: [employee_id], references: [id], onDelete: Cascade)
-  leavePolicy LeavePolicy @relation(fields: [leave_type_id], references: [id])
+  leave_type_id String      @db.Uuid
+  used          Int         @default(0)
+  remaining     Int         @default(0)
+  total         Int         @default(0)
+  leavePolicyId String?     @db.Uuid
+  created_at    DateTime    @default(now())
+  updated_at    DateTime    @updatedAt
+  employee      Employee    @relation(fields: [employee_id], references: [id], onDelete: Cascade)
+  leavePolicy   LeavePolicy @relation(fields: [leave_type_id], references: [id])
 
   @@unique([employee_id, year, leave_type_id])
   @@map("leave_balances")

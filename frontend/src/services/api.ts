@@ -7,13 +7,13 @@ import type {
   Employee,
   EmployeeDocument,
   EmergencyContact,
-  BankDetails,
+  BankDetail,
   AttendanceLog,
   BiometricDevice,
   LeaveRequest,
   Holiday,
   LeavePolicy,
-  Asset,
+  AssetRecord,
   OffboardingCase,
   RoleDefinition,
   UserAssignment,
@@ -125,14 +125,14 @@ export const emergencyContactService = {
 
 // ──── Bank Details Service ────
 export const bankService = {
-  async getByEmployee(employeeId: string): Promise<BankDetails | undefined> {
+  async getByEmployee(employeeId: string): Promise<BankDetail | undefined> {
     await delay();
     return BANK_DETAILS[employeeId];
   },
   async update(
     employeeId: string,
-    data: Partial<BankDetails>,
-  ): Promise<BankDetails> {
+    data: Partial<BankDetail>,
+  ): Promise<BankDetail> {
     await delay();
     BANK_DETAILS[employeeId] = {
       ...BANK_DETAILS[employeeId],
@@ -242,11 +242,11 @@ export const leaveService = {
 
 // ──── Asset Service ────
 export const assetService = {
-  async list(): Promise<Asset[]> {
+  async list(): Promise<AssetRecord[]> {
     await delay();
     return [...ASSETS];
   },
-  async create(asset: Omit<Asset, "id">): Promise<Asset> {
+  async create(asset: Omit<AssetRecord, "id">): Promise<AssetRecord> {
     await delay();
     const a = {
       ...asset,
@@ -255,7 +255,7 @@ export const assetService = {
     ASSETS.push(a);
     return a;
   },
-  async update(id: string, data: Partial<Asset>): Promise<void> {
+  async update(id: string, data: Partial<AssetRecord>): Promise<void> {
     await delay();
     const a = ASSETS.find((x) => x.id === id);
     if (a) Object.assign(a, data);

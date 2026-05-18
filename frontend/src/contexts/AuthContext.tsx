@@ -162,7 +162,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const forgotPassword = async (_email: string) => {
-    // TODO: Implement forgot password endpoint in backend
     throw new Error("Forgot password not yet implemented");
   };
 

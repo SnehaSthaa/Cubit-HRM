@@ -10,6 +10,7 @@ import {
   ReportsAction,
   RolesandAccessAction,
   EmployeeSelfServiceAction,
+  DeviceAction,
 } from "./permission";
 
 const super_admin: AllowedType = {
@@ -72,6 +73,13 @@ const super_admin: AllowedType = {
     [EmployeeSelfServiceAction.Create]: true,
     [EmployeeSelfServiceAction.Edit]: true,
     [EmployeeSelfServiceAction.Delete]: true,
+  },
+  device: {
+    [DeviceAction.View]: true,
+    [DeviceAction.Create]: true,
+    [DeviceAction.Update]: true,
+    [DeviceAction.Delete]: true,
+    [DeviceAction.Sync]: true,
   },
 };
 
@@ -136,6 +144,13 @@ const hr_admin: AllowedType = {
     [EmployeeSelfServiceAction.Edit]: true,
     [EmployeeSelfServiceAction.Delete]: false,
   },
+  device: {
+    [DeviceAction.View]: true,
+    [DeviceAction.Create]: true,
+    [DeviceAction.Update]: true,
+    [DeviceAction.Delete]: true,
+    [DeviceAction.Sync]: true,
+  },
 };
 
 const employee: AllowedType = {
@@ -153,8 +168,8 @@ const employee: AllowedType = {
   },
   attendance: {
     [AttendanceAction.View]: true,
-    [AttendanceAction.Create]: false,
-    [AttendanceAction.Edit]: false,
+    [AttendanceAction.Create]: true,
+    [AttendanceAction.Edit]: true,
     [AttendanceAction.Delete]: false,
   },
   leave_management: {
@@ -199,10 +214,17 @@ const employee: AllowedType = {
     [EmployeeSelfServiceAction.Edit]: true,
     [EmployeeSelfServiceAction.Delete]: false,
   },
+  device: {
+    [DeviceAction.View]: false,
+    [DeviceAction.Create]: false,
+    [DeviceAction.Update]: false,
+    [DeviceAction.Delete]: false,
+    [DeviceAction.Sync]: false,
+  },
 };
 
 export const allPermission = {
-  super_admin: super_admin,
-  hr_admin: hr_admin,
-  employee: employee,
+  super_admin,
+  hr_admin,
+  employee,
 };

@@ -41,7 +41,6 @@ type MeResponse = {
     role: "super_admin" | "hr_admin" | "employee";
     is_active: boolean;
   };
-  // Backend joins employee via user_id — this is always the correct employee
   employee: EmployeeAPI | null;
 };
 

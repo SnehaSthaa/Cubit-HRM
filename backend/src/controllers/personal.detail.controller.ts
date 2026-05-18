@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { prisma } from "../db/prisma";
+import { prisma } from "../db/prisma.js";
 import { ApiResponse } from "../types/index.js";
 import { updatePersonalDetailSchema } from "../validator/personal.detail.validator.js";
 import { ZodError } from "zod";

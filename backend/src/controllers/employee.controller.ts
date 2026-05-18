@@ -1,6 +1,6 @@
 import { NextFunction, Request, Response } from "express";
 import bcrypt from "bcrypt";
-import { prisma } from "../db/prisma";
+import { prisma } from "../db/prisma.js";
 import { ApiResponse } from "../types/index.js";
 import { sendWelcomeEmail } from "@/utils/mailer.js";
 import { generateRandomPassword } from "@/utils/generatePassword.js";
@@ -8,31 +8,98 @@ import { minioClient, MINIO_BASE_URL, ensureBucket } from "@/utils/minio.js";
 
 const EMPLOYEE_FILES_BUCKET = "employee-files";
 
+// Valid values from the MunicipalityType enum in schema.prisma
+const VALID_MUNICIPALITY_TYPES = [
+  "metropolitian",
+  "sub_metropolitian",
+  "municipality",
+  "rural_municipality",
+] as const;
+
+type MunicipalityType = (typeof VALID_MUNICIPALITY_TYPES)[number];
+
+function parseMunicipality(value: unknown): MunicipalityType | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (VALID_MUNICIPALITY_TYPES.includes(value as MunicipalityType)) {
+    return value as MunicipalityType;
+  }
+  throw new Error(
+    `Invalid municipality type "${value}". Must be one of: ${VALID_MUNICIPALITY_TYPES.join(", ")}`,
+  );
+}
+
 export class EmployeeController {
+  // ── GET /employees ───────────────────────────────────────────────────────
   static async getAll(req: Request, res: Response<ApiResponse>) {
     try {
-      const employees = await prisma.employee.findMany({
-        include: {
-          user: true,
-          manager: { include: { personal_details: true } },
-          personal_details: true,
-          department: { orderBy: { joining_date: "desc" } },
-          bank_details: true,
-          assets: true,
-          emergencyContacts: true,
-          documents: true,
-        },
-      });
+      const {
+        device_mapping,
+        page = "1",
+        limit = "20",
+      } = req.query as Record<string, string>;
+
+      const skip = (parseInt(page) - 1) * parseInt(limit);
+      const take = parseInt(limit);
+
+      // ?device_mapping=null   → employees with NO device mapping
+      // ?device_mapping=mapped → employees WITH at least one device mapping
+      // (omitted)              → all employees
+      const where: any = {};
+      if (device_mapping === "null") {
+        where.deviceMappings = { none: {} };
+      } else if (device_mapping === "mapped") {
+        where.deviceMappings = { some: {} };
+      }
+
+      const [employees, total] = await Promise.all([
+        prisma.employee.findMany({
+          where,
+          skip,
+          take,
+          orderBy: { created_at: "desc" },
+          include: {
+            user: true,
+            manager: { include: { personal_details: true } },
+            personal_details: true,
+            department: { orderBy: { joining_date: "desc" } },
+            bank_details: true,
+            assets: true,
+            emergencyContacts: true,
+            documents: true,
+            deviceMappings: {
+              include: {
+                device: {
+                  select: {
+                    serial_number: true,
+                    device_name: true,
+                    location: true,
+                    is_active: true,
+                  },
+                },
+              },
+            },
+          },
+        }),
+        prisma.employee.count({ where }),
+      ]);
+
       res.json({
         success: true,
         message: "Employees retrieved",
         data: employees,
-      });
+        meta: {
+          total,
+          page: parseInt(page),
+          limit: take,
+          total_pages: Math.ceil(total / take),
+        },
+      } as any);
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });
     }
   }
 
+  // ── GET /employees/:id ───────────────────────────────────────────────────
   static async getById(req: Request, res: Response<ApiResponse>) {
     try {
       const { id } = req.params;
@@ -47,6 +114,18 @@ export class EmployeeController {
           assets: true,
           emergencyContacts: true,
           documents: true,
+          deviceMappings: {
+            include: {
+              device: {
+                select: {
+                  serial_number: true,
+                  device_name: true,
+                  location: true,
+                  is_active: true,
+                },
+              },
+            },
+          },
         },
       });
       if (!employee) {
@@ -64,6 +143,7 @@ export class EmployeeController {
     }
   }
 
+  // ── POST /employees ──────────────────────────────────────────────────────
   static async create(req: Request, res: Response<ApiResponse>) {
     try {
       const body = req.body;
@@ -83,6 +163,26 @@ export class EmployeeController {
         return res
           .status(401)
           .json({ success: false, message: "Unauthorized" });
+      }
+
+      // FIX B: Validate municipality enum before any DB call
+      let municipality: MunicipalityType | undefined;
+      try {
+        municipality = parseMunicipality(body.municipality);
+      } catch (e: any) {
+        return res.status(400).json({ success: false, message: e.message });
+      }
+
+      // FIX (bank_details guard): if salary is provided, all required bank
+      // fields must also be present to avoid storing empty strings.
+      if (body.salary !== undefined) {
+        if (!body.account_number || !body.bank_name || !body.branch) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "account_number, bank_name, and branch are required when salary is provided",
+          });
+        }
       }
 
       const existingUser = await prisma.user.findUnique({
@@ -116,7 +216,7 @@ export class EmployeeController {
               first_name: body.first_name,
               last_name: body.last_name,
               email: body.email,
-              phone: body.phone ?? null,
+              ...(body.phone ? { phone: body.phone } : {}),
               ...(body.date_of_birth && {
                 date_of_birth: new Date(body.date_of_birth),
               }),
@@ -145,8 +245,9 @@ export class EmployeeController {
               ...(body.state && { state: body.state }),
               ...(body.district && { district: body.district }),
               ...(body.city && { city: body.city }),
-              ...(body.municipality && { municipality: body.municipality }),
-              ...(body.ward && { ward: Number(body.ward) }),
+              // FIX B: use the validated enum value, not the raw string
+              ...(municipality !== undefined && { municipality }),
+              ...(body.ward !== undefined && { ward: Number(body.ward) }),
               ...(body.tole && { tole: body.tole }),
             },
           },
@@ -168,13 +269,13 @@ export class EmployeeController {
               ...(body.level && { level: body.level }),
             },
           },
-          ...(body.salary && {
+          ...(body.salary !== undefined && {
             bank_details: {
               create: {
-                account_number: body.account_number ?? "",
+                account_number: body.account_number,
                 salary: body.salary,
-                bank_name: body.bank_name ?? "",
-                branch: body.branch ?? "",
+                bank_name: body.bank_name,
+                branch: body.branch,
                 ...(body.contract_type && {
                   contract_type: body.contract_type,
                 }),
@@ -200,14 +301,17 @@ export class EmployeeController {
         password: randomPassword,
       });
 
-      res
-        .status(201)
-        .json({ success: true, message: "Employee created", data: employee });
+      res.status(201).json({
+        success: true,
+        message: "Employee created",
+        data: employee,
+      });
     } catch (error: any) {
       res.status(400).json({ success: false, message: error.message });
     }
   }
 
+  // ── PATCH /employees/:id ─────────────────────────────────────────────────
   static async update(req: Request, res: Response<ApiResponse>) {
     try {
       const { id } = req.params;
@@ -223,114 +327,131 @@ export class EmployeeController {
           .json({ success: false, message: "Employee not found" });
       }
 
-      // Only fall back to body if the nested key is explicitly absent
-      const pd =
-        body.personal_details !== undefined ? body.personal_details : body;
-      const bd = body.bank_details !== undefined ? body.bank_details : body;
-      const dept = body.department !== undefined ? body.department : body;
+      // FIX A: Only read personal_details from the dedicated sub-object.
+      // Previously `pd` fell back to `body`, meaning ANY request body field
+      // (e.g. manager_id) could accidentally trigger personal-detail writes
+      // and flip employee_verified to false.
+      const pd = body.personal_details ?? {};
+      const bd = body.bank_details ?? {};
+      const dept = body.department ?? {};
 
-      // ── Personal details ──────────────────────────────────────────────────
+      // ── Personal details ────────────────────────────────────────────────
       const personalUpdate: any = {};
-      const personalFields = [
-        "first_name",
-        "last_name",
-        "email",
-        "phone",
-        "date_of_birth",
-        "gender",
-        "marital_status",
-        "citizenship_number",
-        "pan_number",
-        "nid_number",
-        "ssid_number",
-        "father_name",
-        "mother_name",
-        "grandfather_name",
-        "current_address",
-        "permanent_address",
-        "country",
-        "state",
-        "district",
-        "city",
-        "municipality",
-        "ward",
-        "tole",
-      ];
-      for (const field of personalFields) {
-        if (pd[field] !== undefined) {
-          if (field === "date_of_birth" && pd[field]) {
-            personalUpdate[field] = new Date(pd[field]);
-          } else if (field === "ward") {
-            personalUpdate[field] = Number(pd[field]);
-          } else {
-            personalUpdate[field] = pd[field];
+
+      // FIX A continued: only process personal fields when the sub-object was
+      // explicitly provided by the caller.
+      if (body.personal_details !== undefined) {
+        // FIX B: Validate municipality enum before building the update object
+        if (pd.municipality !== undefined) {
+          try {
+            personalUpdate.municipality = parseMunicipality(pd.municipality);
+          } catch (e: any) {
+            return res.status(400).json({ success: false, message: e.message });
           }
         }
-      }
 
-      // Remove unique fields from update if unchanged (avoids spurious constraint errors)
-      const uniquePersonalFields = [
-        "citizenship_number",
-        "pan_number",
-        "nid_number",
-        "ssid_number",
-        "email",
-      ];
-      if (existing.personal_details) {
-        for (const field of uniquePersonalFields) {
-          if (
-            personalUpdate[field] !== undefined &&
-            personalUpdate[field] === (existing.personal_details as any)[field]
-          ) {
-            delete personalUpdate[field];
+        const personalFields = [
+          "first_name",
+          "last_name",
+          "email",
+          "phone",
+          "date_of_birth",
+          "gender",
+          "marital_status",
+          "citizenship_number",
+          "pan_number",
+          "nid_number",
+          "ssid_number",
+          "father_name",
+          "mother_name",
+          "grandfather_name",
+          "current_address",
+          "permanent_address",
+          "country",
+          "state",
+          "district",
+          "city",
+          // municipality handled above via parseMunicipality
+          "ward",
+          "tole",
+        ];
+
+        for (const field of personalFields) {
+          if (pd[field] !== undefined) {
+            if (field === "date_of_birth" && pd[field]) {
+              personalUpdate[field] = new Date(pd[field]);
+            } else if (field === "ward") {
+              personalUpdate[field] = Number(pd[field]);
+            } else {
+              personalUpdate[field] = pd[field];
+            }
           }
         }
-      }
 
-      if (personalUpdate.email) {
-        const emailConflict = await prisma.user.findFirst({
-          where: { email: personalUpdate.email, NOT: { id: existing.user_id } },
-        });
-        if (emailConflict) {
-          return res
-            .status(400)
-            .json({
+        // Skip unchanged unique fields to avoid spurious constraint errors
+        const uniquePersonalFields = [
+          "citizenship_number",
+          "pan_number",
+          "nid_number",
+          "ssid_number",
+          "email",
+        ];
+        if (existing.personal_details) {
+          for (const field of uniquePersonalFields) {
+            if (
+              personalUpdate[field] !== undefined &&
+              personalUpdate[field] ===
+                (existing.personal_details as any)[field]
+            ) {
+              delete personalUpdate[field];
+            }
+          }
+        }
+
+        if (personalUpdate.email) {
+          const emailConflict = await prisma.user.findFirst({
+            where: {
+              email: personalUpdate.email,
+              NOT: { id: existing.user_id },
+            },
+          });
+          if (emailConflict) {
+            return res.status(400).json({
               success: false,
               message: "Email is already in use by another employee",
             });
+          }
         }
-      }
-      if (personalUpdate.citizenship_number) {
-        const conflict = await prisma.personalDetail.findFirst({
-          where: {
-            citizenship_number: personalUpdate.citizenship_number,
-            NOT: { employee_id: id },
-          },
-        });
-        if (conflict) {
-          return res
-            .status(400)
-            .json({
+        if (personalUpdate.citizenship_number) {
+          const conflict = await prisma.personalDetail.findFirst({
+            where: {
+              citizenship_number: personalUpdate.citizenship_number,
+              NOT: { employee_id: id },
+            },
+          });
+          if (conflict) {
+            return res.status(400).json({
               success: false,
               message: "Citizenship number already in use",
             });
+          }
         }
-      }
-      if (personalUpdate.pan_number) {
-        const conflict = await prisma.personalDetail.findFirst({
-          where: {
-            pan_number: personalUpdate.pan_number,
-            NOT: { employee_id: id },
-          },
-        });
-        if (conflict) {
-          return res
-            .status(400)
-            .json({ success: false, message: "PAN number already in use" });
+        if (personalUpdate.pan_number) {
+          const conflict = await prisma.personalDetail.findFirst({
+            where: {
+              pan_number: personalUpdate.pan_number,
+              NOT: { employee_id: id },
+            },
+          });
+          if (conflict) {
+            return res
+              .status(400)
+              .json({ success: false, message: "PAN number already in use" });
+          }
         }
       }
 
-      // ── Bank details ──────────────────────────────────────────────────────
+      // ── Bank details ────────────────────────────────────────────────────
       const bankUpdate: any = {};
       if (body.bank_details !== undefined) {
         for (const field of [
@@ -347,7 +468,7 @@ export class EmployeeController {
         }
       }
 
-      // ── Department ────────────────────────────────────────────────────────
+      // ── Department ──────────────────────────────────────────────────────
       const deptUpdate: any = {};
       if (body.department !== undefined) {
         for (const field of [
@@ -370,7 +491,7 @@ export class EmployeeController {
       const targetDeptId: string | undefined = dept.id;
 
       const [employee] = await prisma.$transaction(async (tx) => {
-        // ── Sync user name / email / active flag ──────────────────────────
+        // Sync user name / email / active flag
         if (
           pd.first_name ||
           pd.last_name ||
@@ -393,7 +514,7 @@ export class EmployeeController {
           });
         }
 
-        // ── Personal details upsert ───────────────────────────────────────
+        // Personal details upsert
         if (Object.keys(personalUpdate).length > 0) {
           await tx.personalDetail.upsert({
             where: { employee_id: id },
@@ -419,7 +540,7 @@ export class EmployeeController {
           });
         }
 
-        // ── Bank details upsert ───────────────────────────────────────────
+        // Bank details upsert
         if (Object.keys(bankUpdate).length > 0) {
           await tx.bankDetail.upsert({
             where: { employee_id: id },
@@ -435,7 +556,7 @@ export class EmployeeController {
           });
         }
 
-        // ── Department update ─────────────────────────────────────────────
+        // Department update
         if (Object.keys(deptUpdate).length > 0) {
           let deptToUpdate: { id: string } | null = null;
 
@@ -482,6 +603,18 @@ export class EmployeeController {
             emergencyContacts: true,
             documents: true,
             assets: true,
+            deviceMappings: {
+              include: {
+                device: {
+                  select: {
+                    serial_number: true,
+                    device_name: true,
+                    location: true,
+                    is_active: true,
+                  },
+                },
+              },
+            },
           },
         });
 
@@ -495,6 +628,7 @@ export class EmployeeController {
     }
   }
 
+  // ── DELETE /employees/:id ────────────────────────────────────────────────
   static async delete(req: Request, res: Response<ApiResponse>) {
     try {
       const { id } = req.params;
@@ -519,6 +653,7 @@ export class EmployeeController {
     }
   }
 
+  // ── POST /employees/:id/verify ───────────────────────────────────────────
   static async verifyEmployee(req: Request, res: Response<ApiResponse>) {
     try {
       const { id } = req.params;
@@ -536,6 +671,7 @@ export class EmployeeController {
     }
   }
 
+  // ── POST /employees/:id/profile-image ────────────────────────────────────
   static async uploadProfileImage(req: Request, res: Response<ApiResponse>) {
     try {
       const file = req.file;
@@ -550,9 +686,12 @@ export class EmployeeController {
           .status(400)
           .json({ success: false, message: "Only image files allowed" });
       }
+
       await ensureBucket(EMPLOYEE_FILES_BUCKET);
+
       const fileName = `profile/${id}/${Date.now()}-${file.originalname}`;
       const fileUrl = `${MINIO_BASE_URL}/${EMPLOYEE_FILES_BUCKET}/${fileName}`;
+
       await minioClient.putObject(
         EMPLOYEE_FILES_BUCKET,
         fileName,
@@ -560,10 +699,12 @@ export class EmployeeController {
         file.size,
         { "Content-Type": file.mimetype },
       );
+
       const updated = await prisma.employee.update({
         where: { id },
         data: { profile_image: fileUrl },
       });
+
       return res.json({
         success: true,
         message: "Profile image uploaded",
@@ -574,6 +715,7 @@ export class EmployeeController {
     }
   }
 
+  // ── POST /employees/cleanup-departments ──────────────────────────────────
   static async cleanupDuplicateDepartments(
     req: Request,
     res: Response<ApiResponse>,
