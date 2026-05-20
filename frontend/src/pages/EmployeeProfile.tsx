@@ -32,6 +32,7 @@ import {
   Baby,
   LucideIcon,
   CalendarCheck,
+  LogOut,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -62,6 +63,7 @@ import {
 } from "@/types";
 import { apiClient } from "@/services/apiClient";
 import type { AssetApi } from "@/services/apiClient";
+import { EmployementStatus } from "./EmployeeSelfService";
 
 const itemVariant = {
   hidden: { opacity: 0, y: 10 },
@@ -108,7 +110,7 @@ interface ProfileFormData {
   ssid_number?: string;
 }
 
-const leaveTypeIcons: Record<string, LucideIcon> = {
+export const leaveTypeIcons: Record<string, LucideIcon> = {
   "sick leave": Stethoscope,
   " paid leave": Briefcase,
   " vacation leave": Plane,
@@ -134,12 +136,11 @@ const docStatusClass: Record<string, string> = {
   Pending: "status-pending",
   Rejected: "status-resigned",
 };
+
 const empStatusClass: Record<string, string> = {
-  Active: "status-active",
-  "On Leave": "status-pending",
-  "Notice Period": "status-notice",
-  Resigned: "status-resigned",
-  Inactive: "status-inactive",
+  active: "active",
+  notice_period: "notice_period",
+  resigned: "resigned",
 };
 
 const enumToLeaveType: Record<string, string> = {
@@ -318,7 +319,7 @@ export default function EmployeeProfile() {
   const [editing, setEditing] = useState(false);
   const [profileForm, setProfileForm] =
     useState<ProfileFormData>(EMPTY_PROFILE);
-  const [empStatus, setEmpStatus] = useState("Active");
+  const [empStatus, setEmpStatus] = useState<EmployementStatus>("active");
   const [profileImage, setProfileImage] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
 
@@ -379,7 +380,7 @@ export default function EmployeeProfile() {
           res.data.map((l: LeaveBalance) => ({
             name: enumToLeaveType[l.leave_type] ?? l.leave_type,
             leave_type: l.leave_type,
-            total: l.total ?? 12,
+            total: l.total,
             used: l.used ?? 0,
             remaining: l.remaining ?? 12 - (l.used ?? 0),
           })),
@@ -538,6 +539,7 @@ export default function EmployeeProfile() {
     name: "",
     reason: "",
   });
+  const isResigned = empStatus === "resigned";
   const fetchAvailableAssets = async () => {
     try {
       setLoadingAvailable(true);
@@ -567,7 +569,7 @@ export default function EmployeeProfile() {
         if (e.profile_image) {
           setProfileImage(`${e.profile_image}?t=${Date.now()}`);
         }
-        setEmpStatus(e.employment_status ?? "Active");
+        setEmpStatus((e.employment_status as EmployementStatus) ?? "active");
         const bank = bankFromEmployee(e);
         setBankCommitted(bank);
         setBankDraft(bank);
@@ -720,8 +722,13 @@ export default function EmployeeProfile() {
   const handleChangeStatus = async (s: string) => {
     if (!id) return;
     try {
-      await apiClient.updateEmployee(id, { employment_status: s });
-      setEmpStatus(s);
+      if (s === "notice_period") {
+        await apiClient.startOffboarding(id);
+      } else {
+        await apiClient.updateEmployee(id, { employment_status: s });
+      }
+
+      setEmpStatus(s as EmployementStatus);
       setDeptCommitted((p) => ({ ...p, employment_status: s }));
       setDeptDraft((p) => ({ ...p, employment_status: s }));
       setEmployee((p) =>
@@ -729,6 +736,10 @@ export default function EmployeeProfile() {
       );
       setStatusDialog(false);
       toast({ title: `Status changed to ${s}` });
+
+      if (s === "notice_period") {
+        navigate(`/offboarding`);
+      }
     } catch (err) {
       toast({
         title: "Failed to update status",
@@ -911,6 +922,18 @@ export default function EmployeeProfile() {
         </motion.div>
       )}
 
+      {isResigned && (
+        <motion.div
+          variants={itemVariant}
+          className="flex items-center gap-3 px-4 py-3 rounded-xl border border-destructive/20 bg-destructive/5"
+        >
+          <LogOut className="w-4 h-4 text-destructive shrink-0" />
+          <p className="text-sm text-destructive font-medium">
+            This employee has been resigned. Profile is read-only — no changes
+            can be made.
+          </p>
+        </motion.div>
+      )}
       {/* ── Header ──────────────────────────────────────────────────────────── */}
       <motion.div
         variants={itemVariant}
@@ -1003,6 +1026,7 @@ export default function EmployeeProfile() {
                     variant="outline"
                     size="sm"
                     className="gap-1.5 press-effect"
+                    disabled={isResigned}
                   >
                     <ChevronDown className="w-3.5 h-3.5" />
                     Change Status
@@ -1013,20 +1037,26 @@ export default function EmployeeProfile() {
                     <DialogTitle>Change Employment Status</DialogTitle>
                   </DialogHeader>
                   <div className="space-y-3 pt-2">
-                    {[
-                      "Active",
-                      "On Leave",
-                      "Notice Period",
-                      "Resigned",
-                      "Inactive",
-                    ].map((s) => (
+                    {(
+                      [
+                        "active",
+                        "notice_period",
+                        "resigned",
+                      ] as EmployementStatus[]
+                    ).map((s) => (
                       <button
                         key={s}
                         onClick={() => handleChangeStatus(s)}
-                        className={`w-full text-left px-4 py-3 rounded-lg border transition-colors ${empStatus === s ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50"}`}
+                        className={`w-full text-left px-4 py-3 rounded-lg border transition-colors ${
+                          empStatus === s
+                            ? "border-primary bg-primary/5"
+                            : "border-border hover:bg-muted/50"
+                        }`}
                       >
                         <div className="flex items-center justify-between">
-                          <span className="text-sm font-medium">{s}</span>
+                          <span className="text-sm font-medium capitalize">
+                            {s}
+                          </span>
                           <span className={`status-pill ${empStatusClass[s]}`}>
                             {s}
                           </span>
@@ -1041,7 +1071,7 @@ export default function EmployeeProfile() {
               variant="outline"
               size="sm"
               className="gap-1.5 press-effect"
-              disabled={saving}
+              disabled={saving || isResigned}
               onClick={
                 editing
                   ? handleSaveProfile
@@ -1684,86 +1714,88 @@ export default function EmployeeProfile() {
             </div>
           </TabsContent>
           {/* leaves */}
-          <TabsContent value="leave" className="space-y-6">
-            {/* --- Individual Leave Cards --- */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-              {leaveBalance?.length > 0 ? (
-                leaveBalance.map((lb) => {
-                  const percentage = lb.total
-                    ? Math.round((lb.used / lb.total) * 100)
-                    : 0;
+          {isHR && (
+            <TabsContent value="leave" className="space-y-6">
+              {/* --- Individual Leave Cards --- */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                {leaveBalance?.length > 0 ? (
+                  leaveBalance.map((lb) => {
+                    const percentage = lb.total
+                      ? Math.round((lb.used / lb.total) * 100)
+                      : 0;
 
-                  const Icon =
-                    leaveTypeIcons[lb.leave_type.toLowerCase()] || Briefcase;
+                    const Icon =
+                      leaveTypeIcons[lb.leave_type.toLowerCase()] || Briefcase;
 
-                  return (
-                    <div
-                      key={lb.leave_type}
-                      className="group relative bg-card border border-border rounded-xl p-5 
+                    return (
+                      <div
+                        key={lb.leave_type}
+                        className="group relative bg-card border border-border rounded-xl p-5 
           hover:shadow-md hover:border-primary/40 transition-all duration-300"
-                    >
-                      {/* Header */}
-                      <div className="flex items-center justify-between mb-3">
-                        <div className="flex items-center gap-2">
-                          <div className="p-2 rounded-md bg-primary/10 text-primary">
-                            <Icon className="w-4 h-4" />
+                      >
+                        {/* Header */}
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center gap-2">
+                            <div className="p-2 rounded-md bg-primary/10 text-primary">
+                              <Icon className="w-4 h-4" />
+                            </div>
+                            <p className="text-sm font-semibold">
+                              {lb.name || lb.leave_type}
+                            </p>
                           </div>
-                          <p className="text-sm font-semibold">
-                            {lb.name || lb.leave_type}
+
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary">
+                            {percentage}%
+                          </span>
+                        </div>
+
+                        {/* Remaining */}
+                        <div className="mb-3">
+                          <p className="text-2xl font-bold tracking-tight">
+                            {lb.remaining}
+                            <span className="text-sm font-normal text-muted-foreground ml-1">
+                              days left
+                            </span>
                           </p>
                         </div>
 
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary">
-                          {percentage}%
-                        </span>
-                      </div>
-
-                      {/* Remaining */}
-                      <div className="mb-3">
-                        <p className="text-2xl font-bold tracking-tight">
-                          {lb.remaining}
-                          <span className="text-sm font-normal text-muted-foreground ml-1">
-                            days left
-                          </span>
-                        </p>
-                      </div>
-
-                      {/* Stats */}
-                      <div className="flex justify-between text-xs text-muted-foreground mb-3">
-                        <span>Used: {lb.used}</span>
-                        <span>Total: {lb.total}</span>
-                      </div>
-
-                      {/* Progress */}
-                      {typeof lb.total === "number" && (
-                        <div className="h-2 bg-muted rounded-full overflow-hidden">
-                          <div
-                            className={`h-full rounded-full transition-all duration-500 ${
-                              percentage > 80
-                                ? "bg-red-500"
-                                : percentage > 60
-                                  ? "bg-amber-500"
-                                  : "bg-primary"
-                            }`}
-                            style={{ width: `${percentage}%` }}
-                          />
+                        {/* Stats */}
+                        <div className="flex justify-between text-xs text-muted-foreground mb-3">
+                          <span>Used: {lb.used}</span>
+                          <span>Total: {lb.total}</span>
                         </div>
-                      )}
 
-                      {/* Hover glow */}
-                      <div className="absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100 transition pointer-events-none bg-gradient-to-r from-primary/5 to-transparent" />
-                    </div>
-                  );
-                })
-              ) : (
-                <div className="col-span-full py-12 text-center border-2 border-dashed border-border rounded-xl">
-                  <p className="text-sm text-muted-foreground">
-                    No leave records found.
-                  </p>
-                </div>
-              )}
-            </div>
-          </TabsContent>
+                        {/* Progress */}
+                        {typeof lb.total === "number" && (
+                          <div className="h-2 bg-muted rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all duration-500 ${
+                                percentage > 80
+                                  ? "bg-red-500"
+                                  : percentage > 60
+                                    ? "bg-amber-500"
+                                    : "bg-primary"
+                              }`}
+                              style={{ width: `${percentage}%` }}
+                            />
+                          </div>
+                        )}
+
+                        {/* Hover glow */}
+                        <div className="absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100 transition pointer-events-none bg-gradient-to-r from-primary/5 to-transparent" />
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="col-span-full py-12 text-center border-2 border-dashed border-border rounded-xl">
+                    <p className="text-sm text-muted-foreground">
+                      No leave records found.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </TabsContent>
+          )}
 
           {/* ══ Emergency ═════════════════════════════════════════════════════ */}
           <TabsContent value="emergency" className="space-y-4">
@@ -1779,6 +1811,7 @@ export default function EmployeeProfile() {
                       size="sm"
                       variant="outline"
                       className="gap-1.5 press-effect"
+                      disabled={isResigned}
                     >
                       <Plus className="w-3.5 h-3.5" />
                       Add Contact
@@ -1961,7 +1994,7 @@ export default function EmployeeProfile() {
                     variant="outline"
                     size="sm"
                     className="gap-1.5 press-effect"
-                    disabled={saving}
+                    disabled={saving || isResigned}
                     onClick={
                       editingBank
                         ? handleSaveBank
@@ -1992,7 +2025,7 @@ export default function EmployeeProfile() {
                       mono: true,
                     },
                     { label: "Branch", key: "branch" },
-                    { label: "Salary (NPR)", key: "salary", mono: true },
+
                     { label: "Contract Type", key: "contract_type" },
                   ] as {
                     label: string;
@@ -2055,7 +2088,7 @@ export default function EmployeeProfile() {
                     variant="outline"
                     size="sm"
                     className="gap-1.5 press-effect"
-                    disabled={saving}
+                    disabled={saving || isResigned}
                     onClick={
                       editingDept
                         ? handleSaveDept
@@ -2136,7 +2169,6 @@ export default function EmployeeProfile() {
           </TabsContent>
 
           {/* ══ Assets ════════════════════════════════════════════════════════ */}
-          {/* ══ Assets ════════════════════════════════════════════════════════ */}
           <TabsContent value="assets" className="space-y-4">
             <div className="bg-card border border-border rounded-lg">
               <div className="px-5 py-3 border-b border-border flex items-center justify-between">
@@ -2155,7 +2187,11 @@ export default function EmployeeProfile() {
                   }}
                 >
                   <DialogTrigger asChild>
-                    <Button size="sm" className="gap-1.5 press-effect">
+                    <Button
+                      size="sm"
+                      className="gap-1.5 press-effect"
+                      disabled={isResigned}
+                    >
                       <Plus className="w-3.5 h-3.5" />
                       Add Asset
                     </Button>

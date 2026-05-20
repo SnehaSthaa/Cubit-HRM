@@ -26,6 +26,7 @@ import {
   AlertTriangle,
   Baby,
   Loader2,
+  LogOut,
   CheckSquare,
   ChevronDown,
   ShieldCheck,
@@ -62,6 +63,10 @@ import type {
   LeaveBalance,
 } from "@/types";
 import { apiClient, AssetApi } from "@/services/apiClient";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "@/contexts/AuthContext";
+import { Protected } from "@/components/common/ProtectedRoute";
+import { EmployeeSelfServiceAction } from "@/permissions/permission";
 
 const itemVariant = {
   hidden: { opacity: 0, y: 10 },
@@ -71,6 +76,8 @@ const containerVariant = {
   hidden: { opacity: 0 },
   show: { opacity: 1, transition: { staggerChildren: 0.04 } },
 };
+
+export type EmployementStatus = "active" | "notice_period" | "resigned";
 
 interface BankFormData {
   bank_name: string;
@@ -87,7 +94,7 @@ interface DeptFormData {
   joining_date: string;
   previous_experience: string;
   employment_type: string;
-  employment_status: string;
+  employment_status: EmployementStatus | "";
 }
 interface ProfileFormData {
   first_name: string;
@@ -137,11 +144,9 @@ const docStatusClass: Record<string, string> = {
 };
 
 const empStatusClass: Record<string, string> = {
-  Active: "status-active",
-  "On Leave": "status-pending",
-  "Notice Period": "status-notice",
-  Resigned: "status-resigned",
-  Inactive: "status-inactive",
+  active: "active",
+  notice_period: "notice_period",
+  resigned: "resigned",
 };
 
 const enumToLeaveType: Record<string, string> = {
@@ -243,13 +248,15 @@ function deptFromEmployee(e: Employee): DeptFormData {
     joining_date: toDateStr(e.joining_date),
     previous_experience: e.previous_experience ?? "",
     employment_type: e.type ?? "",
-    employment_status: e.employment_status ?? "",
+    employment_status: (e.employment_status as EmployementStatus) ?? "",
   };
 }
 
 export default function EmployeeSelfService() {
   const { toast } = useToast();
   const { isHR } = useRole();
+  const { updateUser } = useAuth();
+
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const docFileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -265,8 +272,9 @@ export default function EmployeeSelfService() {
   const [changedSections, setChangedSections] = useState<Set<Section>>(
     new Set(),
   );
+  const navigate = useNavigate();
   const [statusDialog, setStatusDialog] = useState(false);
-  const [empStatus, setEmpStatus] = useState("Active");
+  const [empStatus, setEmpStatus] = useState<EmployementStatus>("active");
 
   function markChanged(section: Section) {
     setHasUnverifiedChanges(true);
@@ -335,6 +343,7 @@ export default function EmployeeSelfService() {
     name: "",
     reason: "",
   });
+  const isResigned = empStatus === "resigned";
 
   const pendingDocCount = documents.filter(
     (d) => d.status === "Pending",
@@ -389,7 +398,7 @@ export default function EmployeeSelfService() {
           ...profileFromEmployee(e, user.email),
           email: user.email,
         });
-        setEmpStatus(e.employment_status ?? "Active");
+        setEmpStatus((e.employment_status as EmployementStatus) ?? "active");
         if (e.profile_image)
           setProfileImage(`${e.profile_image}?t=${Date.now()}`);
         const bank = bankFromEmployee(e);
@@ -469,6 +478,7 @@ export default function EmployeeSelfService() {
       const file = e.target.files[0];
       const res = await apiClient.uploadEmployeeProfileImage(employee.id, file);
       setProfileImage(`${res.data.profile_image}?t=${Date.now()}`);
+      updateUser({ profile_image: res.data.profile_image });
       if (fileInputRef.current) fileInputRef.current.value = "";
     } catch (err) {
       toast({
@@ -492,6 +502,9 @@ export default function EmployeeSelfService() {
       setEmployee((prev) =>
         prev ? ({ ...prev, ...profileForm } as unknown as Employee) : prev,
       );
+      updateUser({
+        name: `${profileForm.first_name} ${profileForm.last_name}`.trim(),
+      });
       setEditing(false);
       markChanged("profile");
       toast({
@@ -611,24 +624,38 @@ export default function EmployeeSelfService() {
   const handleChangeStatus = async (s: string) => {
     if (!employee?.id) return;
     try {
-      await apiClient.updateEmployee(employee.id, { employment_status: s });
-      setEmpStatus(s);
-      setDeptCommitted((p) => ({ ...p, employment_status: s }));
-      setDeptDraft((p) => ({ ...p, employment_status: s }));
+      if (s === "notice_period") {
+        await apiClient.startOffboarding(employee.id);
+      } else {
+        await apiClient.updateEmployee(employee.id, { employment_status: s });
+      }
+
+      setEmpStatus(s as EmployementStatus);
+      setDeptCommitted((p) => ({
+        ...p,
+        employment_status: s as EmployementStatus,
+      }));
+      setDeptDraft((p) => ({
+        ...p,
+        employment_status: s as EmployementStatus,
+      }));
       setEmployee((p) =>
         p ? ({ ...p, employment_status: s } as unknown as Employee) : p,
       );
       setStatusDialog(false);
       toast({ title: `Status changed to ${s}` });
+
+      if (s === "notice_period") {
+        navigate(`/offboarding`);
+      }
     } catch (err) {
       toast({
         title: "Failed to update status",
-        description: errMsg(err),
+        description: err.message,
         variant: "destructive",
       });
     }
   };
-
   const handleUploadDoc = async () => {
     if (!selectedFile || !uploadDocType || !employee?.id) return;
     const alreadyExists = documents.some((doc) => doc.type === uploadDocType);
@@ -826,1301 +853,1337 @@ export default function EmployeeSelfService() {
     (employee.first_name?.[0] ?? "") + (employee.last_name?.[0] ?? "");
 
   return (
-    <motion.div
-      variants={containerVariant}
-      initial="hidden"
-      animate="show"
-      className="space-y-4"
+    <Protected
+      allPermissions={[
+        EmployeeSelfServiceAction.View,
+        EmployeeSelfServiceAction.Edit,
+      ]}
     >
-      <motion.div variants={itemVariant}>
-        <h1 className="text-lg font-semibold">My Profile</h1>
-        <p className="text-sm text-muted-foreground">
-          Employee Self-Service Portal
-        </p>
-      </motion.div>
-
-      {/* ── Approval Banner ──────────────────────────────────────────────── */}
-      {showApprovalBanner && (
-        <motion.div
-          variants={itemVariant}
-          className="flex items-center justify-between gap-4 px-4 py-3 rounded-xl border border-primary/20 bg-primary/5 dark:bg-primary/10 shadow-sm"
-        >
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-primary/10 rounded-full">
-              <ShieldCheck className="w-5 h-5 text-primary" />
-            </div>
-            <div>
-              <p className="text-sm font-semibold">Review Required</p>
-              <p className="text-xs text-muted-foreground">
-                {[
-                  changedSections.size > 0 &&
-                    `${changedSections.size} section${changedSections.size > 1 ? "s" : ""} updated`,
-                  pendingDocCount > 0 &&
-                    `${pendingDocCount} document${pendingDocCount > 1 ? "s" : ""} pending`,
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}{" "}
-                — click to approve all at once.
-              </p>
-            </div>
-          </div>
-          <Button
-            size="sm"
-            className="gap-2 px-4 shadow-sm press-effect shrink-0"
-            disabled={approvingAll}
-            onClick={handleApproveAll}
-          >
-            {approvingAll ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <CheckSquare className="w-4 h-4" />
-            )}
-            Approve All Changes
-          </Button>
-        </motion.div>
-      )}
-
-      {/* ── Header ──────────────────────────────────────────────────────── */}
       <motion.div
-        variants={itemVariant}
-        className="bg-card border border-border rounded-lg p-5"
+        variants={containerVariant}
+        initial="hidden"
+        animate="show"
+        className="space-y-4"
       >
-        <div className="flex items-start justify-between">
-          <div className="flex items-center gap-4">
-            <div className="w-16 h-16 rounded-xl bg-primary/10 flex items-center justify-center text-xl font-bold text-primary overflow-hidden">
-              {profileImage ? (
-                <img
-                  src={profileImage}
-                  alt="Profile"
-                  className="w-full h-full object-cover"
-                />
-              ) : editing ? (
-                (profileForm.first_name[0] ?? "") +
-                (profileForm.last_name[0] ?? "")
-              ) : (
-                initials
-              )}
-            </div>
-            {editing && (
-              <div className="flex flex-col gap-2">
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  hidden
-                  accept="image/*"
-                  onChange={handleProfileUpload}
-                />
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={uploading}
-                  onClick={() => fileInputRef.current?.click()}
-                  className="gap-1.5"
-                >
-                  {uploading ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Upload className="w-3.5 h-3.5" />
-                  )}
-                  Upload Image
-                </Button>
+        <motion.div variants={itemVariant}>
+          <h1 className="text-lg font-semibold">My Profile</h1>
+          <p className="text-sm text-muted-foreground">
+            Employee Self-Service Portal
+          </p>
+        </motion.div>
+
+        {/* ── Approval Banner ──────────────────────────────────────────────── */}
+        {showApprovalBanner && (
+          <motion.div
+            variants={itemVariant}
+            className="flex items-center justify-between gap-4 px-4 py-3 rounded-xl border border-primary/20 bg-primary/5 dark:bg-primary/10 shadow-sm"
+          >
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-primary/10 rounded-full">
+                <ShieldCheck className="w-5 h-5 text-primary" />
               </div>
-            )}
-            <div>
-              <h2 className="font-semibold text-lg">
-                {editing
-                  ? `${profileForm.first_name} ${profileForm.last_name}`.trim()
-                  : displayName}
-              </h2>
-              <p className="text-sm text-muted-foreground">
-                {deptCommitted.position} · {deptCommitted.department}
-              </p>
-              <div className="flex items-center gap-3 mt-2">
-                <span className="text-xs font-mono-data text-muted-foreground">
-                  {employee.employee_id}
-                </span>
-                <span
-                  className={`status-pill ${empStatusClass[empStatus] ?? "status-active"}`}
-                >
-                  {empStatus}
-                </span>
-                <span className="text-xs text-muted-foreground">
-                  {deptCommitted.employment_type}
-                </span>
-                {isHR && (hasUnverifiedChanges || pendingDocCount > 0) && (
-                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-400">
-                    <ShieldAlert className="w-2.5 h-2.5" />
-                    {changedSections.size + (pendingDocCount > 0 ? 1 : 0)}{" "}
-                    pending
-                  </span>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            {/* Change Status — HR only */}
-            {isHR && (
-              <Dialog open={statusDialog} onOpenChange={setStatusDialog}>
-                <DialogTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="gap-1.5 press-effect"
-                  >
-                    <ChevronDown className="w-3.5 h-3.5" />
-                    Change Status
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="max-w-sm">
-                  <DialogHeader>
-                    <DialogTitle>Change Employment Status</DialogTitle>
-                  </DialogHeader>
-                  <div className="space-y-3 pt-2">
-                    {[
-                      "Active",
-                      "On Leave",
-                      "Notice Period",
-                      "Resigned",
-                      "Inactive",
-                    ].map((s) => (
-                      <button
-                        key={s}
-                        onClick={() => handleChangeStatus(s)}
-                        className={`w-full text-left px-4 py-3 rounded-lg border transition-colors ${
-                          empStatus === s
-                            ? "border-primary bg-primary/5"
-                            : "border-border hover:bg-muted/50"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm font-medium">{s}</span>
-                          <span className={`status-pill ${empStatusClass[s]}`}>
-                            {s}
-                          </span>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </DialogContent>
-              </Dialog>
-            )}
-
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5 press-effect"
-              disabled={saving}
-              onClick={
-                editing
-                  ? handleSaveProfile
-                  : () => {
-                      setProfileForm(profileFromEmployee(employee));
-                      setEditing(true);
-                    }
-              }
-            >
-              {saving && editing ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : editing ? (
-                <Save className="w-3.5 h-3.5" />
-              ) : (
-                <Edit2 className="w-3.5 h-3.5" />
-              )}
-              {editing ? "Save" : "Edit Profile"}
-            </Button>
-            {editing && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="press-effect"
-                onClick={() => {
-                  setProfileForm(profileFromEmployee(employee));
-                  setEditing(false);
-                }}
-              >
-                <X className="w-3.5 h-3.5" />
-                Cancel
-              </Button>
-            )}
-          </div>
-        </div>
-      </motion.div>
-
-      {/* ── Tabs ────────────────────────────────────────────────────────── */}
-      <motion.div variants={itemVariant}>
-        <Tabs
-          value={activeTab}
-          onValueChange={setActiveTab}
-          className="space-y-4"
-        >
-          <TabsList className="bg-muted/50 border border-border p-1 h-auto flex-wrap">
-            {(
-              [
-                {
-                  value: "profile",
-                  icon: User,
-                  label: "Personal",
-                  section: "profile" as Section,
-                },
-                {
-                  value: "documents",
-                  icon: FileText,
-                  label: "Documents",
-                  section: null,
-                },
-                {
-                  value: "leave",
-                  icon: CalendarDays,
-                  label: "Leaves",
-                  section: "leave" as Section,
-                },
-                {
-                  value: "emergency",
-                  icon: Phone,
-                  label: "Emergency",
-                  section: null,
-                },
-                {
-                  value: "bank",
-                  icon: CreditCard,
-                  label: "Bank Details",
-                  section: "bank" as Section,
-                },
-                {
-                  value: "department",
-                  icon: Building2,
-                  label: "Department",
-                  section: "department" as Section,
-                },
-                {
-                  value: "assets",
-                  icon: Package,
-                  label: "Assets",
-                  section: null,
-                },
-                {
-                  value: "security",
-                  icon: KeyRound,
-                  label: "Security",
-                  section: null,
-                },
-              ] as const
-            ).map((t) => (
-              <TabsTrigger
-                key={t.value}
-                value={t.value}
-                className="gap-1.5 text-xs data-[state=active]:bg-card data-[state=active]:shadow-sm relative"
-              >
-                <t.icon className="w-3.5 h-3.5" />
-                {t.label}
-                {isHR && t.section && changedSections.has(t.section) && (
-                  <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-amber-500" />
-                )}
-                {isHR && t.value === "documents" && pendingDocCount > 0 && (
-                  <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-amber-500" />
-                )}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-
-          {/* ══ Personal ══════════════════════════════════════════════════ */}
-          <TabsContent value="profile" className="space-y-4">
-            <div className="bg-card border border-border rounded-lg p-5">
-              <h3 className="text-sm font-semibold mb-4">
-                Personal Information
-              </h3>
-              <div className="grid grid-cols-3 gap-4">
-                {(
-                  [
-                    { label: "First Name", key: "first_name" },
-                    { label: "Last Name", key: "last_name" },
-                    { label: "Email", key: "email" },
-                    { label: "Phone", key: "phone", mono: true },
-                    {
-                      label: "Date of Birth",
-                      key: "date_of_birth",
-                      mono: true,
-                    },
-                    { label: "Citizenship Number", key: "citizenship_number" },
-                    { label: "PAN Number", key: "pan_number" },
-                    { label: "NID Number", key: "nid_number" },
-                    { label: "SSF SSID", key: "ssid_number" },
-                  ] as {
-                    label: string;
-                    key: keyof ProfileFormData;
-                    mono?: boolean;
-                  }[]
-                ).map((f) => (
-                  <div key={f.key}>
-                    <p className="text-xs text-muted-foreground mb-1">
-                      {f.label}
-                    </p>
-                    {editing ? (
-                      <Input
-                        type={f.key === "date_of_birth" ? "date" : "text"}
-                        value={profileForm[f.key] ?? ""}
-                        onChange={(e) =>
-                          setProfileForm({
-                            ...profileForm,
-                            [f.key]: e.target.value,
-                          })
-                        }
-                        className="h-8 text-sm"
-                      />
-                    ) : (
-                      <p
-                        className={`text-sm ${f.mono ? "font-mono-data" : ""}`}
-                      >
-                        {profileForm[f.key] || "—"}
-                      </p>
-                    )}
-                  </div>
-                ))}
-                {[
-                  {
-                    label: "Gender",
-                    key: "gender" as keyof ProfileFormData,
-                    options: ["Female", "Male", "Others"],
-                    placeholder: "Select gender",
-                  },
-                  {
-                    label: "Marital Status",
-                    key: "marital_status" as keyof ProfileFormData,
-                    options: ["Single", "Married", "Divorced", "Widowed"],
-                    placeholder: "Select marital status",
-                  },
-                ].map((field) => {
-                  const rawVal = profileForm[field.key] ?? "";
-                  const normalizedVal =
-                    field.options.find(
-                      (o) => o.toLowerCase() === rawVal.toLowerCase(),
-                    ) ?? rawVal;
-                  return (
-                    <div key={field.key} className="space-y-1">
-                      <p className="text-xs text-muted-foreground mb-1">
-                        {field.label}
-                      </p>
-                      {editing ? (
-                        <Select
-                          value={normalizedVal}
-                          onValueChange={(value) =>
-                            setProfileForm({
-                              ...profileForm,
-                              [field.key]: value,
-                            })
-                          }
-                        >
-                          <SelectTrigger className="h-8 text-xs">
-                            <SelectValue placeholder={field.placeholder} />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {field.options.map((opt) => (
-                              <SelectItem
-                                key={opt}
-                                value={opt}
-                                className="text-xs"
-                              >
-                                {opt}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      ) : (
-                        <p className="text-sm">{normalizedVal || "—"}</p>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="bg-card border border-border rounded-lg p-5">
-              <h3 className="text-sm font-semibold mb-4">Family Details</h3>
-              <div className="grid grid-cols-3 gap-4">
-                {(
-                  [
-                    { label: "Father's Name", key: "father_name" },
-                    { label: "Grandfather's Name", key: "grandfather_name" },
-                    { label: "Mother's Name", key: "mother_name" },
-                  ] as { label: string; key: keyof ProfileFormData }[]
-                ).map((f) => (
-                  <div key={f.key}>
-                    <p className="text-xs text-muted-foreground mb-1">
-                      {f.label}
-                    </p>
-                    {editing ? (
-                      <Input
-                        value={profileForm[f.key] ?? ""}
-                        onChange={(e) =>
-                          setProfileForm({
-                            ...profileForm,
-                            [f.key]: e.target.value,
-                          })
-                        }
-                        className="h-8 text-sm"
-                      />
-                    ) : (
-                      <p className="text-sm">{profileForm[f.key] || "—"}</p>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="bg-card border border-border rounded-lg p-5">
-              <h3 className="text-sm font-semibold mb-4">Address</h3>
-              <div className="grid grid-cols-2 gap-4">
-                {(
-                  [
-                    { label: "Current Address", key: "current_address" },
-                    { label: "Permanent Address", key: "permanent_address" },
-                  ] as { label: string; key: keyof ProfileFormData }[]
-                ).map((f) => (
-                  <div key={f.key}>
-                    <p className="text-xs text-muted-foreground mb-1">
-                      {f.label}
-                    </p>
-                    {editing ? (
-                      <Input
-                        value={profileForm[f.key] ?? ""}
-                        onChange={(e) =>
-                          setProfileForm({
-                            ...profileForm,
-                            [f.key]: e.target.value,
-                          })
-                        }
-                        className="h-8 text-sm"
-                      />
-                    ) : (
-                      <p className="text-sm">{profileForm[f.key] || "—"}</p>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </TabsContent>
-
-          {/* ══ Documents ═════════════════════════════════════════════════ */}
-          <TabsContent value="documents" className="space-y-4">
-            <div className="bg-card border border-border rounded-lg">
-              <div className="px-5 py-3 border-b border-border">
-                <h3 className="text-sm font-semibold">Documents</h3>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Citizenship, PAN, certificates, NID, police report, SSF
+              <div>
+                <p className="text-sm font-semibold">Review Required</p>
+                <p className="text-xs text-muted-foreground">
+                  {[
+                    changedSections.size > 0 &&
+                      `${changedSections.size} section${changedSections.size > 1 ? "s" : ""} updated`,
+                    pendingDocCount > 0 &&
+                      `${pendingDocCount} document${pendingDocCount > 1 ? "s" : ""} pending`,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}{" "}
+                  — click to approve all at once.
                 </p>
               </div>
-              <div className="px-5 py-4 border-b border-border space-y-3">
-                <div className="flex items-center gap-2">
-                  <Select
-                    value={uploadDocType}
-                    onValueChange={setUploadDocType}
+            </div>
+            <Button
+              size="sm"
+              className="gap-2 px-4 shadow-sm press-effect shrink-0"
+              disabled={approvingAll}
+              onClick={handleApproveAll}
+            >
+              {approvingAll ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <CheckSquare className="w-4 h-4" />
+              )}
+              Approve All Changes
+            </Button>
+          </motion.div>
+        )}
+        {isResigned && (
+          <motion.div
+            variants={itemVariant}
+            className="flex items-center gap-3 px-4 py-3 rounded-xl border border-destructive/20 bg-destructive/5"
+          >
+            <LogOut className="w-4 h-4 text-destructive shrink-0" />
+            <p className="text-sm text-destructive font-medium">
+              Your account is in resigned status. Profile is read-only.
+            </p>
+          </motion.div>
+        )}
+
+        {/* ── Header ──────────────────────────────────────────────────────── */}
+        <motion.div
+          variants={itemVariant}
+          className="bg-card border border-border rounded-lg p-5"
+        >
+          <div className="flex items-start justify-between">
+            <div className="flex items-center gap-4">
+              <div className="w-16 h-16 rounded-xl bg-primary/10 flex items-center justify-center text-xl font-bold text-primary overflow-hidden">
+                {profileImage ? (
+                  <img
+                    src={profileImage}
+                    alt="Profile"
+                    className="w-full h-full object-cover"
+                  />
+                ) : editing ? (
+                  (profileForm.first_name[0] ?? "") +
+                  (profileForm.last_name[0] ?? "")
+                ) : (
+                  initials
+                )}
+              </div>
+              {editing && (
+                <div className="flex flex-col gap-2">
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    hidden
+                    accept="image/*"
+                    onChange={handleProfileUpload}
+                  />
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={uploading}
+                    onClick={() => fileInputRef.current?.click()}
+                    className="gap-1.5"
                   >
-                    <SelectTrigger className="w-48 h-8 text-xs">
-                      <SelectValue placeholder="Select document type *" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {documentTypes.map((t) => (
-                        <SelectItem key={t} value={t} className="text-xs">
-                          {t}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {!uploadDocType && (
-                    <span className="text-xs text-amber-600 dark:text-amber-400">
-                      ← Choose a type before uploading
+                    {uploading ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Upload className="w-3.5 h-3.5" />
+                    )}
+                    Upload Image
+                  </Button>
+                </div>
+              )}
+              <div>
+                <h2 className="font-semibold text-lg">
+                  {editing
+                    ? `${profileForm.first_name} ${profileForm.last_name}`.trim()
+                    : displayName}
+                </h2>
+                <p className="text-sm text-muted-foreground">
+                  {deptCommitted.position} · {deptCommitted.department}
+                </p>
+                <div className="flex items-center gap-3 mt-2">
+                  <span className="text-xs font-mono-data text-muted-foreground">
+                    {employee.employee_id}
+                  </span>
+                  <span
+                    className={`status-pill ${empStatusClass[empStatus] ?? "active"}`}
+                  >
+                    {employee.employment_status}
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    {deptCommitted.employment_type}
+                  </span>
+                  {isHR && (hasUnverifiedChanges || pendingDocCount > 0) && (
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-400">
+                      <ShieldAlert className="w-2.5 h-2.5" />
+                      {changedSections.size +
+                        (pendingDocCount > 0 ? 1 : 0)}{" "}
+                      pending
                     </span>
                   )}
                 </div>
-                <div
-                  onDragOver={handleDragOver}
-                  onDragLeave={handleDragLeave}
-                  onDrop={handleDrop}
-                  className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${isDragging ? "border-primary bg-primary/5" : uploadDocType ? "border-border hover:border-primary/50" : "border-border opacity-60 cursor-not-allowed"}`}
-                  onClick={() =>
-                    uploadDocType && docFileInputRef.current?.click()
-                  }
-                >
-                  <Upload className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
-                  <p className="text-sm text-muted-foreground">
-                    {uploadDocType
-                      ? "Drag & drop files here, or click to browse"
-                      : "Select a document type above first"}
-                  </p>
-                  {selectedFile && (
-                    <p className="text-xs text-primary mt-1 font-medium">
-                      {selectedFile.name}
-                    </p>
-                  )}
-                  <div
-                    className="flex items-center gap-2 justify-center mt-3"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <input
-                      type="file"
-                      ref={docFileInputRef}
-                      onChange={(e) =>
-                        setSelectedFile(e.target.files?.[0] ?? null)
-                      }
-                      className="hidden"
-                    />
-                    <Button
-                      size="sm"
-                      className="h-8 text-xs gap-1"
-                      disabled={!selectedFile || !uploadDocType}
-                      onClick={handleUploadDoc}
-                    >
-                      <Upload className="w-3 h-3" />
-                      Upload
-                    </Button>
-                  </div>
-                </div>
               </div>
-              <table className="nexus-table">
-                <thead>
-                  <tr>
-                    <th>Document</th>
-                    <th>Type</th>
-                    <th>Size</th>
-                    <th>Uploaded</th>
-                    <th>Status</th>
-                    <th className="w-10"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {documents.length === 0 && (
-                    <tr>
-                      <td
-                        colSpan={6}
-                        className="text-center text-sm text-muted-foreground py-6"
-                      >
-                        No documents uploaded yet.
-                      </td>
-                    </tr>
-                  )}
-                  {documents.map((doc) => (
-                    <tr key={doc.id ?? `${doc.name}-${doc.uploaded_at}`}>
-                      <td>
-                        <div className="flex items-center gap-2">
-                          <FileText className="w-4 h-4 text-muted-foreground shrink-0" />
-                          <span className="text-sm">{doc.name}</span>
-                        </div>
-                      </td>
-                      <td className="text-xs text-muted-foreground">
-                        {doc.type}
-                      </td>
-                      <td className="text-xs font-mono-data text-muted-foreground">
-                        {doc.file_size}
-                      </td>
-                      <td className="text-xs font-mono-data text-muted-foreground">
-                        {toDateStr(doc.uploaded_at)}
-                      </td>
-                      <td>
-                        <span
-                          className={`status-pill ${docStatusClass[doc.status]}`}
-                        >
-                          {doc.status === "Verified" && (
-                            <Check className="w-3 h-3 mr-1" />
-                          )}
-                          {doc.status === "Pending" && (
-                            <AlertCircle className="w-3 h-3 mr-1" />
-                          )}
-                          {doc.status === "Rejected" && (
-                            <X className="w-3 h-3 mr-1" />
-                          )}
-                          {doc.status}
-                        </span>
-                      </td>
-                      <td>
-                        <button
-                          onClick={() => handleDeleteDoc(doc.id)}
-                          className="p-1 rounded hover:bg-destructive/10"
-                        >
-                          <Trash2 className="w-3.5 h-3.5 text-destructive" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
             </div>
-          </TabsContent>
 
-          {/* ══ Leaves ════════════════════════════════════════════════════ */}
-          <TabsContent value="leave" className="space-y-6">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-              {leaveBalance?.length > 0 ? (
-                leaveBalance.map((lb) => {
-                  const percentage = lb.total
-                    ? Math.round((lb.used / lb.total) * 100)
-                    : 0;
-                  const Icon =
-                    leaveTypeIcons[lb.leave_type?.toLowerCase()] ?? Briefcase;
-                  return (
-                    <div
-                      key={lb.leave_type}
-                      className="group relative bg-card border border-border rounded-xl p-5 hover:shadow-md hover:border-primary/40 transition-all duration-300"
-                    >
-                      <div className="flex items-center justify-between mb-3">
-                        <div className="flex items-center gap-2">
-                          <div className="p-2 rounded-md bg-primary/10 text-primary">
-                            <Icon className="w-4 h-4" />
-                          </div>
-                          <p className="text-sm font-semibold">
-                            {lb.name || lb.leave_type}
-                          </p>
-                        </div>
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary">
-                          {percentage}%
-                        </span>
-                      </div>
-                      <div className="mb-3">
-                        <p className="text-2xl font-bold tracking-tight">
-                          {lb.remaining}
-                          <span className="text-sm font-normal text-muted-foreground ml-1">
-                            days left
-                          </span>
-                        </p>
-                      </div>
-                      <div className="flex justify-between text-xs text-muted-foreground mb-3">
-                        <span>Used: {lb.used}</span>
-                        <span>Total: {lb.total}</span>
-                      </div>
-                      {typeof lb.total === "number" && (
-                        <div className="h-2 bg-muted rounded-full overflow-hidden">
-                          <div
-                            className={`h-full rounded-full transition-all duration-500 ${percentage > 80 ? "bg-red-500" : percentage > 60 ? "bg-amber-500" : "bg-primary"}`}
-                            style={{ width: `${percentage}%` }}
-                          />
-                        </div>
-                      )}
-                      <div className="absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100 transition pointer-events-none bg-gradient-to-r from-primary/5 to-transparent" />
-                    </div>
-                  );
-                })
-              ) : (
-                <div className="col-span-full py-12 text-center border-2 border-dashed border-border rounded-xl">
-                  <p className="text-sm text-muted-foreground">
-                    No leave records found.
-                  </p>
-                </div>
-              )}
-            </div>
-          </TabsContent>
-
-          {/* ══ Emergency ═════════════════════════════════════════════════ */}
-          <TabsContent value="emergency" className="space-y-4">
-            <div className="bg-card border border-border rounded-lg">
-              <div className="px-5 py-3 border-b border-border flex items-center justify-between">
-                <h3 className="text-sm font-semibold">Emergency Contacts</h3>
-                <Dialog
-                  open={addContactDialog}
-                  onOpenChange={setAddContactDialog}
-                >
+            <div className="flex items-center gap-2">
+              {/* Change Status — HR only */}
+              {isHR && (
+                <Dialog open={statusDialog} onOpenChange={setStatusDialog}>
                   <DialogTrigger asChild>
                     <Button
-                      size="sm"
                       variant="outline"
+                      size="sm"
                       className="gap-1.5 press-effect"
                     >
-                      <Plus className="w-3.5 h-3.5" />
-                      Add Contact
+                      <ChevronDown className="w-3.5 h-3.5" />
+                      Change Status
                     </Button>
                   </DialogTrigger>
-                  <DialogContent className="max-w-md">
+                  <DialogContent className="max-w-sm">
                     <DialogHeader>
-                      <DialogTitle>Add Emergency Contact</DialogTitle>
+                      <DialogTitle>Change Employment Status</DialogTitle>
                     </DialogHeader>
                     <div className="space-y-3 pt-2">
-                      <div className="grid grid-cols-2 gap-3">
-                        {[
-                          { label: "Name *", key: "name" },
-                          { label: "Relation", key: "relation" },
-                          { label: "Phone *", key: "phone" },
-                          { label: "Email", key: "email" },
-                        ].map((f) => (
-                          <div key={f.key}>
-                            <label className="text-xs text-muted-foreground mb-1 block">
-                              {f.label}
-                            </label>
-                            <Input
-                              value={
-                                (newContact as Record<string, string>)[f.key]
-                              }
-                              onChange={(e) =>
-                                setNewContact({
-                                  ...newContact,
-                                  [f.key]: e.target.value,
-                                })
-                              }
-                              className="h-8 text-sm"
-                            />
-                          </div>
-                        ))}
-                      </div>
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setAddContactDialog(false)}
+                      {(
+                        [
+                          "active",
+                          "notice_period",
+                          "resigned",
+                        ] as EmployementStatus[]
+                      ).map((s) => (
+                        <button
+                          key={s}
+                          onClick={() => handleChangeStatus(s)}
+                          className={`w-full text-left px-4 py-3 rounded-lg border transition-colors ${
+                            empStatus === s
+                              ? "border-primary bg-primary/5"
+                              : "border-border hover:bg-muted/50"
+                          }`}
                         >
-                          Cancel
-                        </Button>
-                        <Button size="sm" onClick={handleAddContact}>
-                          Add Contact
-                        </Button>
-                      </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm font-medium capitalize">
+                              {s.replace("_", " ")}
+                            </span>
+                            <span
+                              className={`status-pill ${empStatusClass[s]}`}
+                            >
+                              {s}
+                            </span>
+                          </div>
+                        </button>
+                      ))}
                     </div>
                   </DialogContent>
                 </Dialog>
-              </div>
-              <div className="divide-y divide-border">
-                {emergencyContacts.length === 0 && (
-                  <p className="px-5 py-6 text-sm text-muted-foreground text-center">
-                    No emergency contacts added yet.
-                  </p>
+              )}
+
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 press-effect"
+                disabled={saving || isResigned}
+                onClick={
+                  editing
+                    ? handleSaveProfile
+                    : () => {
+                        setProfileForm(profileFromEmployee(employee));
+                        setEditing(true);
+                      }
+                }
+              >
+                {saving && editing ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : editing ? (
+                  <Save className="w-3.5 h-3.5" />
+                ) : (
+                  <Edit2 className="w-3.5 h-3.5" />
                 )}
-                {emergencyContacts.map((contact) => (
-                  <div key={contact.id} className="px-5 py-4">
-                    {editingContactId === contact.id ? (
-                      <div className="grid grid-cols-4 gap-2 items-end">
-                        {(["name", "relation", "phone"] as const).map((key) => (
-                          <Input
-                            key={key}
-                            value={editContactData[key]}
-                            onChange={(e) =>
-                              setEditContactData({
-                                ...editContactData,
-                                [key]: e.target.value,
-                              })
-                            }
-                            className="h-8 text-sm"
-                            placeholder={
-                              key.charAt(0).toUpperCase() + key.slice(1)
-                            }
-                          />
-                        ))}
-                        <div className="flex gap-1">
-                          <Button
-                            size="sm"
-                            className="h-8"
-                            onClick={() => handleUpdateContact(contact.id)}
-                          >
-                            <Save className="w-3 h-3" />
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-8"
-                            onClick={() => setEditingContactId(null)}
-                          >
-                            <X className="w-3 h-3" />
-                          </Button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-4">
-                          <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center text-sm font-medium text-muted-foreground">
-                            {contact.name
-                              .split(" ")
-                              .map((n) => n[0])
-                              .join("")}
-                          </div>
-                          <div>
-                            <p className="text-sm font-medium">
-                              {contact.name}
-                            </p>
-                            <p className="text-xs text-muted-foreground">
-                              {contact.relation}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-4">
-                          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                            <Phone className="w-3.5 h-3.5" />
-                            <span className="font-mono-data">
-                              {contact.phone}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                            <Mail className="w-3.5 h-3.5" />
-                            <span>{contact.email}</span>
-                          </div>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 px-2"
-                            onClick={() => {
-                              setEditingContactId(contact.id);
-                              setEditContactData({
-                                name: contact.name,
-                                relation: contact.relation,
-                                phone: contact.phone,
-                                email: contact.email ?? "",
-                              });
-                            }}
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </Button>
-                          <button
-                            onClick={() => handleDeleteContact(contact.id)}
-                            className="p-1 rounded hover:bg-destructive/10"
-                          >
-                            <Trash2 className="w-3.5 h-3.5 text-destructive" />
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
+                {editing ? "Save" : "Edit Profile"}
+              </Button>
+              {editing && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="press-effect"
+                  onClick={() => {
+                    setProfileForm(profileFromEmployee(employee));
+                    setEditing(false);
+                  }}
+                >
+                  <X className="w-3.5 h-3.5" />
+                  Cancel
+                </Button>
+              )}
             </div>
-          </TabsContent>
+          </div>
+        </motion.div>
 
-          {/* ══ Bank ══════════════════════════════════════════════════════ */}
-          <TabsContent value="bank" className="space-y-4">
-            <div className="bg-card border border-border rounded-lg p-5">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-semibold">
-                  Bank & Salary Information
-                </h3>
-                <div className="flex gap-2">
-                  {editingBank && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="press-effect"
-                      onClick={() => {
-                        setBankDraft({ ...bankCommitted });
-                        setEditingBank(false);
-                      }}
-                    >
-                      <X className="w-3.5 h-3.5" />
-                      Cancel
-                    </Button>
+        {/* ── Tabs ────────────────────────────────────────────────────────── */}
+        <motion.div variants={itemVariant}>
+          <Tabs
+            value={activeTab}
+            onValueChange={setActiveTab}
+            className="space-y-4"
+          >
+            <TabsList className="bg-muted/50 border border-border p-1 h-auto flex-wrap">
+              {(
+                [
+                  {
+                    value: "profile",
+                    icon: User,
+                    label: "Personal",
+                    section: "profile" as Section,
+                  },
+                  {
+                    value: "documents",
+                    icon: FileText,
+                    label: "Documents",
+                    section: null,
+                  },
+                  {
+                    value: "leave",
+                    icon: CalendarDays,
+                    label: "Leaves",
+                    section: "leave" as Section,
+                  },
+                  {
+                    value: "emergency",
+                    icon: Phone,
+                    label: "Emergency",
+                    section: null,
+                  },
+                  {
+                    value: "bank",
+                    icon: CreditCard,
+                    label: "Bank Details",
+                    section: "bank" as Section,
+                  },
+                  {
+                    value: "department",
+                    icon: Building2,
+                    label: "Department",
+                    section: "department" as Section,
+                  },
+                  {
+                    value: "assets",
+                    icon: Package,
+                    label: "Assets",
+                    section: null,
+                  },
+                  {
+                    value: "security",
+                    icon: KeyRound,
+                    label: "Security",
+                    section: null,
+                  },
+                ] as const
+              ).map((t) => (
+                <TabsTrigger
+                  key={t.value}
+                  value={t.value}
+                  className="gap-1.5 text-xs data-[state=active]:bg-card data-[state=active]:shadow-sm relative"
+                >
+                  <t.icon className="w-3.5 h-3.5" />
+                  {t.label}
+                  {isHR && t.section && changedSections.has(t.section) && (
+                    <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-amber-500" />
                   )}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="gap-1.5 press-effect"
-                    disabled={saving}
-                    onClick={
-                      editingBank
-                        ? handleSaveBank
-                        : () => {
-                            setBankDraft({ ...bankCommitted });
-                            setEditingBank(true);
-                          }
-                    }
-                  >
-                    {saving && editingBank ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    ) : editingBank ? (
-                      <Save className="w-3.5 h-3.5" />
-                    ) : (
-                      <Edit2 className="w-3.5 h-3.5" />
-                    )}
-                    {editingBank ? "Save Changes" : "Edit"}
-                  </Button>
-                </div>
-              </div>
-              <div className="grid grid-cols-3 gap-4">
-                {(
-                  [
-                    { label: "Bank Name", key: "bank_name" },
-                    {
-                      label: "Account Number",
-                      key: "account_number",
-                      mono: true,
-                    },
-                    { label: "Branch", key: "branch" },
-                    { label: "Salary (NPR)", key: "salary", mono: true },
-                    { label: "Contract Type", key: "contract_type" },
-                  ] as {
-                    label: string;
-                    key: keyof BankFormData;
-                    mono?: boolean;
-                  }[]
-                ).map((f) => (
-                  <div key={f.key}>
-                    <p className="text-xs text-muted-foreground mb-0.5">
-                      {f.label}
-                    </p>
-                    {editingBank ? (
-                      <Input
-                        type={f.key === "salary" ? "number" : "text"}
-                        value={bankDraft[f.key]}
-                        onChange={(e) =>
-                          setBankDraft({
-                            ...bankDraft,
-                            [f.key]: e.target.value,
-                          })
-                        }
-                        className="h-8 text-sm"
-                      />
-                    ) : (
-                      <p
-                        className={`text-sm ${f.mono ? "font-mono-data" : ""}`}
-                      >
-                        {bankCommitted[f.key] || "—"}
+                  {isHR && t.value === "documents" && pendingDocCount > 0 && (
+                    <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-amber-500" />
+                  )}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+
+            {/* ══ Personal ══════════════════════════════════════════════════ */}
+            <TabsContent value="profile" className="space-y-4">
+              <div className="bg-card border border-border rounded-lg p-5">
+                <h3 className="text-sm font-semibold mb-4">
+                  Personal Information
+                </h3>
+                <div className="grid grid-cols-3 gap-4">
+                  {(
+                    [
+                      { label: "First Name", key: "first_name" },
+                      { label: "Last Name", key: "last_name" },
+                      { label: "Email", key: "email" },
+                      { label: "Phone", key: "phone", mono: true },
+                      {
+                        label: "Date of Birth",
+                        key: "date_of_birth",
+                        mono: true,
+                      },
+                      {
+                        label: "Citizenship Number",
+                        key: "citizenship_number",
+                      },
+                      { label: "PAN Number", key: "pan_number" },
+                      { label: "NID Number", key: "nid_number" },
+                      { label: "SSF SSID", key: "ssid_number" },
+                    ] as {
+                      label: string;
+                      key: keyof ProfileFormData;
+                      mono?: boolean;
+                    }[]
+                  ).map((f) => (
+                    <div key={f.key}>
+                      <p className="text-xs text-muted-foreground mb-1">
+                        {f.label}
                       </p>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </TabsContent>
-
-          {/* ══ Department ════════════════════════════════════════════════ */}
-          <TabsContent value="department" className="space-y-4">
-            <div className="bg-card border border-border rounded-lg p-5">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-semibold">
-                  Department & Role Assignment
-                </h3>
-                <div className="flex gap-2">
-                  {editingDept && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="press-effect"
-                      onClick={() => {
-                        setDeptDraft({ ...deptCommitted });
-                        setEditingDept(false);
-                      }}
-                    >
-                      <X className="w-3.5 h-3.5" />
-                      Cancel
-                    </Button>
-                  )}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="gap-1.5 press-effect"
-                    disabled={saving}
-                    onClick={
-                      editingDept
-                        ? handleSaveDept
-                        : () => {
-                            setDeptDraft({ ...deptCommitted });
-                            setEditingDept(true);
-                          }
-                    }
-                  >
-                    {saving && editingDept ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    ) : editingDept ? (
-                      <Save className="w-3.5 h-3.5" />
-                    ) : (
-                      <Edit2 className="w-3.5 h-3.5" />
-                    )}
-                    {editingDept ? "Save Changes" : "Edit"}
-                  </Button>
-                </div>
-              </div>
-              <div className="grid grid-cols-3 gap-4">
-                {(
-                  [
-                    { label: "Department", key: "department" },
-                    { label: "Designation", key: "position" },
-                    { label: "Level", key: "level" },
-                    { label: "Hierarchy", key: "hierarchy" },
-                    {
-                      label: "Date of Joining",
-                      key: "joining_date",
-                      mono: true,
-                    },
-                    {
-                      label: "Previous Experience",
-                      key: "previous_experience",
-                    },
-                    { label: "Employment Type", key: "employment_type" },
-                    { label: "Employment Status", key: "employment_status" },
-                  ] as {
-                    label: string;
-                    key: keyof DeptFormData;
-                    mono?: boolean;
-                  }[]
-                ).map((f) => (
-                  <div key={f.key}>
-                    <p className="text-xs text-muted-foreground mb-0.5">
-                      {f.label}
-                    </p>
-                    {editingDept ? (
-                      f.key === "employment_status" ? (
-                        <p className="text-sm">{empStatus}</p>
-                      ) : (
+                      {editing ? (
                         <Input
-                          type={f.key === "joining_date" ? "date" : "text"}
-                          value={deptDraft[f.key]}
+                          type={f.key === "date_of_birth" ? "date" : "text"}
+                          value={profileForm[f.key] ?? ""}
                           onChange={(e) =>
-                            setDeptDraft({
-                              ...deptDraft,
+                            setProfileForm({
+                              ...profileForm,
                               [f.key]: e.target.value,
                             })
                           }
                           className="h-8 text-sm"
                         />
-                      )
-                    ) : (
-                      <p
-                        className={`text-sm ${f.mono ? "font-mono-data" : ""}`}
-                      >
-                        {f.key === "employment_status"
-                          ? empStatus
-                          : deptCommitted[f.key] || "—"}
-                      </p>
-                    )}
-                  </div>
-                ))}
+                      ) : (
+                        <p
+                          className={`text-sm ${f.mono ? "font-mono-data" : ""}`}
+                        >
+                          {profileForm[f.key] || "—"}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                  {[
+                    {
+                      label: "Gender",
+                      key: "gender" as keyof ProfileFormData,
+                      options: ["Female", "Male", "Others"],
+                      placeholder: "Select gender",
+                    },
+                    {
+                      label: "Marital Status",
+                      key: "marital_status" as keyof ProfileFormData,
+                      options: ["Single", "Married", "Divorced", "Widowed"],
+                      placeholder: "Select marital status",
+                    },
+                  ].map((field) => {
+                    const rawVal = profileForm[field.key] ?? "";
+                    const normalizedVal =
+                      field.options.find(
+                        (o) => o.toLowerCase() === rawVal.toLowerCase(),
+                      ) ?? rawVal;
+                    return (
+                      <div key={field.key} className="space-y-1">
+                        <p className="text-xs text-muted-foreground mb-1">
+                          {field.label}
+                        </p>
+                        {editing ? (
+                          <Select
+                            value={normalizedVal}
+                            onValueChange={(value) =>
+                              setProfileForm({
+                                ...profileForm,
+                                [field.key]: value,
+                              })
+                            }
+                          >
+                            <SelectTrigger className="h-8 text-xs">
+                              <SelectValue placeholder={field.placeholder} />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {field.options.map((opt) => (
+                                <SelectItem
+                                  key={opt}
+                                  value={opt}
+                                  className="text-xs"
+                                >
+                                  {opt}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <p className="text-sm">{normalizedVal || "—"}</p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          </TabsContent>
 
-          {/* ══ Assets ════════════════════════════════════════════════════ */}
-          <TabsContent value="assets" className="space-y-4">
-            <div className="bg-card border border-border rounded-lg">
-              <div className="px-5 py-3 border-b border-border flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-semibold">My Assets</h3>
+              <div className="bg-card border border-border rounded-lg p-5">
+                <h3 className="text-sm font-semibold mb-4">Family Details</h3>
+                <div className="grid grid-cols-3 gap-4">
+                  {(
+                    [
+                      { label: "Father's Name", key: "father_name" },
+                      { label: "Grandfather's Name", key: "grandfather_name" },
+                      { label: "Mother's Name", key: "mother_name" },
+                    ] as { label: string; key: keyof ProfileFormData }[]
+                  ).map((f) => (
+                    <div key={f.key}>
+                      <p className="text-xs text-muted-foreground mb-1">
+                        {f.label}
+                      </p>
+                      {editing ? (
+                        <Input
+                          value={profileForm[f.key] ?? ""}
+                          onChange={(e) =>
+                            setProfileForm({
+                              ...profileForm,
+                              [f.key]: e.target.value,
+                            })
+                          }
+                          className="h-8 text-sm"
+                        />
+                      ) : (
+                        <p className="text-sm">{profileForm[f.key] || "—"}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="bg-card border border-border rounded-lg p-5">
+                <h3 className="text-sm font-semibold mb-4">Address</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  {(
+                    [
+                      { label: "Current Address", key: "current_address" },
+                      { label: "Permanent Address", key: "permanent_address" },
+                    ] as { label: string; key: keyof ProfileFormData }[]
+                  ).map((f) => (
+                    <div key={f.key}>
+                      <p className="text-xs text-muted-foreground mb-1">
+                        {f.label}
+                      </p>
+                      {editing ? (
+                        <Input
+                          value={profileForm[f.key] ?? ""}
+                          onChange={(e) =>
+                            setProfileForm({
+                              ...profileForm,
+                              [f.key]: e.target.value,
+                            })
+                          }
+                          className="h-8 text-sm"
+                        />
+                      ) : (
+                        <p className="text-sm">{profileForm[f.key] || "—"}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </TabsContent>
+
+            {/* ══ Documents ═════════════════════════════════════════════════ */}
+            <TabsContent value="documents" className="space-y-4">
+              <div className="bg-card border border-border rounded-lg">
+                <div className="px-5 py-3 border-b border-border">
+                  <h3 className="text-sm font-semibold">Documents</h3>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    Assets allocated to you
+                    Citizenship, PAN, certificates, NID, police report, SSF
                   </p>
                 </div>
-                <Dialog
-                  open={assetRequestDialog}
-                  onOpenChange={setAssetRequestDialog}
-                >
-                  <DialogTrigger asChild>
-                    <Button size="sm" className="gap-1.5 press-effect">
-                      <Plus className="w-3.5 h-3.5" />
-                      Request Asset
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent>
-                    <DialogHeader>
-                      <DialogTitle>Request New Asset</DialogTitle>
-                    </DialogHeader>
-                    <div className="space-y-4 pt-2">
-                      <div>
-                        <label className="text-xs text-muted-foreground mb-1 block">
-                          Asset Type
-                        </label>
-                        <Select
-                          value={assetRequest.type}
-                          onValueChange={(v) =>
-                            setAssetRequest({ ...assetRequest, type: v })
-                          }
-                        >
-                          <SelectTrigger className="h-9 text-sm">
-                            <SelectValue placeholder="Select type" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {[
-                              "Laptop",
-                              "Monitor",
-                              "Keyboard",
-                              "Mouse",
-                              "Mobile",
-                              "Headset",
-                              "Other",
-                            ].map((t) => (
-                              <SelectItem key={t} value={t}>
-                                {t}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div>
-                        <label className="text-xs text-muted-foreground mb-1 block">
-                          Asset Name
-                        </label>
-                        <Input
-                          value={assetRequest.name}
-                          onChange={(e) =>
-                            setAssetRequest({
-                              ...assetRequest,
-                              name: e.target.value,
-                            })
-                          }
-                          placeholder="e.g., MacBook Pro 16 inch"
-                          className="h-9 text-sm"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-xs text-muted-foreground mb-1 block">
-                          Reason
-                        </label>
-                        <Textarea
-                          value={assetRequest.reason}
-                          onChange={(e) =>
-                            setAssetRequest({
-                              ...assetRequest,
-                              reason: e.target.value,
-                            })
-                          }
-                          placeholder="Why do you need this asset?"
-                          className="text-sm min-h-[80px]"
-                        />
-                      </div>
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setAssetRequestDialog(false)}
-                        >
-                          Cancel
-                        </Button>
-                        <Button size="sm" onClick={handleRequestAsset}>
-                          Submit Request
-                        </Button>
-                      </div>
-                    </div>
-                  </DialogContent>
-                </Dialog>
-              </div>
-              <table className="nexus-table">
-                <thead>
-                  <tr>
-                    <th>Asset ID</th>
-                    <th>Name</th>
-                    <th>Category</th>
-                    <th>Serial Number</th>
-                    <th>Assigned</th>
-                    <th>Status</th>
-                    <th className="w-16"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {employeeAssets.length === 0 && (
-                    <tr>
-                      <td
-                        colSpan={7}
-                        className="text-center text-sm text-muted-foreground py-6"
-                      >
-                        No assets assigned yet.
-                      </td>
-                    </tr>
-                  )}
-                  {employeeAssets.map((asset) => (
-                    <tr key={asset.id}>
-                      <td className="text-xs font-mono-data text-muted-foreground">
-                        {asset.asset_id}
-                      </td>
-                      <td className="text-sm font-medium">{asset.name}</td>
-                      <td className="text-xs text-muted-foreground">
-                        {asset.category ?? asset.type}
-                      </td>
-                      <td className="text-xs font-mono-data text-muted-foreground">
-                        {asset.serial_number || "—"}
-                      </td>
-                      <td className="text-xs font-mono-data text-muted-foreground">
-                        {toDateStr(asset.purchase_date) || "—"}
-                      </td>
-                      <td>
-                        <span
-                          className={`status-pill ${asset.status === "assigned" ? "status-active" : "status-pending"}`}
-                        >
-                          {asset.status}
-                        </span>
-                      </td>
-                      <td>
-                        {asset.status === "assigned" && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 px-2 text-xs text-muted-foreground"
-                            onClick={() => handleReturnAsset(asset.id)}
-                          >
-                            Return
-                          </Button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </TabsContent>
-          {/* ══ Security ══════════════════════════════════════════════════ */}
-          <TabsContent value="security" className="space-y-4">
-            <div className="bg-card border border-border rounded-lg p-5 max-w-md">
-              <h3 className="text-sm font-semibold mb-4">Change Password</h3>
-              <div className="space-y-3">
-                {[
-                  { label: "Current Password", key: "currentPassword" },
-                  { label: "New Password", key: "newPassword" },
-                  { label: "Confirm New Password", key: "confirmPassword" },
-                ].map((f) => (
-                  <div key={f.key}>
-                    <p className="text-xs text-muted-foreground mb-1">
-                      {f.label}
+                <div className="px-5 py-4 border-b border-border space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Select
+                      value={uploadDocType}
+                      onValueChange={setUploadDocType}
+                    >
+                      <SelectTrigger className="w-48 h-8 text-xs">
+                        <SelectValue placeholder="Select document type *" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {documentTypes.map((t) => (
+                          <SelectItem key={t} value={t} className="text-xs">
+                            {t}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {!uploadDocType && (
+                      <span className="text-xs text-amber-600 dark:text-amber-400">
+                        ← Choose a type before uploading
+                      </span>
+                    )}
+                  </div>
+                  <div
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onDrop={handleDrop}
+                    className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${isDragging ? "border-primary bg-primary/5" : uploadDocType ? "border-border hover:border-primary/50" : "border-border opacity-60 cursor-not-allowed"}`}
+                    onClick={() =>
+                      !isResigned &&
+                      uploadDocType &&
+                      docFileInputRef.current?.click()
+                    }
+                  >
+                    <Upload className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
+                    <p className="text-sm text-muted-foreground">
+                      {uploadDocType
+                        ? "Drag & drop files here, or click to browse"
+                        : "Select a document type above first"}
                     </p>
-                    <div className="relative">
-                      <Input
-                        type={
-                          showPasswords[f.key as keyof typeof showPasswords]
-                            ? "text"
-                            : "password"
-                        }
-                        value={passwordForm[f.key as keyof typeof passwordForm]}
+                    {selectedFile && (
+                      <p className="text-xs text-primary mt-1 font-medium">
+                        {selectedFile.name}
+                      </p>
+                    )}
+                    <div
+                      className="flex items-center gap-2 justify-center mt-3"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <input
+                        type="file"
+                        ref={docFileInputRef}
                         onChange={(e) =>
-                          setPasswordForm({
-                            ...passwordForm,
-                            [f.key]: e.target.value,
-                          })
+                          setSelectedFile(e.target.files?.[0] ?? null)
                         }
-                        className="h-8 text-sm pr-8"
-                        placeholder={f.label}
+                        className="hidden"
                       />
-                      <button
-                        type="button"
-                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                        onClick={() =>
-                          setShowPasswords((prev) => ({
-                            ...prev,
-                            [f.key]: !prev[f.key as keyof typeof prev],
-                          }))
-                        }
+                      <Button
+                        size="sm"
+                        className="h-8 text-xs gap-1"
+                        disabled={!selectedFile || !uploadDocType || isResigned}
+                        onClick={handleUploadDoc}
                       >
-                        {showPasswords[f.key as keyof typeof showPasswords] ? (
-                          <EyeOff className="w-3.5 h-3.5" />
-                        ) : (
-                          <Eye className="w-3.5 h-3.5" />
-                        )}
-                      </button>
+                        <Upload className="w-3 h-3" />
+                        Upload
+                      </Button>
                     </div>
                   </div>
-                ))}
-
-                {passwordError && (
-                  <p className="text-xs text-destructive flex items-center gap-1">
-                    <AlertCircle className="w-3.5 h-3.5" />
-                    {passwordError}
-                  </p>
-                )}
-
-                <Button
-                  size="sm"
-                  className="w-full gap-1.5 mt-2"
-                  disabled={changingPassword}
-                  onClick={handleChangePassword}
-                >
-                  {changingPassword ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <KeyRound className="w-3.5 h-3.5" />
-                  )}
-                  Change Password
-                </Button>
+                </div>
+                <table className="nexus-table">
+                  <thead>
+                    <tr>
+                      <th>Document</th>
+                      <th>Type</th>
+                      <th>Size</th>
+                      <th>Uploaded</th>
+                      <th>Status</th>
+                      <th className="w-10"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {documents.length === 0 && (
+                      <tr>
+                        <td
+                          colSpan={6}
+                          className="text-center text-sm text-muted-foreground py-6"
+                        >
+                          No documents uploaded yet.
+                        </td>
+                      </tr>
+                    )}
+                    {documents.map((doc) => (
+                      <tr key={doc.id ?? `${doc.name}-${doc.uploaded_at}`}>
+                        <td>
+                          <div className="flex items-center gap-2">
+                            <FileText className="w-4 h-4 text-muted-foreground shrink-0" />
+                            <span className="text-sm">{doc.name}</span>
+                          </div>
+                        </td>
+                        <td className="text-xs text-muted-foreground">
+                          {doc.type}
+                        </td>
+                        <td className="text-xs font-mono-data text-muted-foreground">
+                          {doc.file_size}
+                        </td>
+                        <td className="text-xs font-mono-data text-muted-foreground">
+                          {toDateStr(doc.uploaded_at)}
+                        </td>
+                        <td>
+                          <span
+                            className={`status-pill ${docStatusClass[doc.status]}`}
+                          >
+                            {doc.status === "Verified" && (
+                              <Check className="w-3 h-3 mr-1" />
+                            )}
+                            {doc.status === "Pending" && (
+                              <AlertCircle className="w-3 h-3 mr-1" />
+                            )}
+                            {doc.status === "Rejected" && (
+                              <X className="w-3 h-3 mr-1" />
+                            )}
+                            {doc.status}
+                          </span>
+                        </td>
+                        <td>
+                          <button
+                            onClick={() => handleDeleteDoc(doc.id)}
+                            className="p-1 rounded hover:bg-destructive/10"
+                          >
+                            <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-            </div>
-          </TabsContent>
-        </Tabs>
+            </TabsContent>
+
+            {/* ══ Leaves ════════════════════════════════════════════════════ */}
+            <TabsContent value="leave" className="space-y-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                {leaveBalance?.length > 0 ? (
+                  leaveBalance.map((lb) => {
+                    const percentage = lb.total
+                      ? Math.round((lb.used / lb.total) * 100)
+                      : 0;
+                    const Icon =
+                      leaveTypeIcons[lb.leave_type?.toLowerCase()] ?? Briefcase;
+                    return (
+                      <div
+                        key={lb.leave_type}
+                        className="group relative bg-card border border-border rounded-xl p-5 hover:shadow-md hover:border-primary/40 transition-all duration-300"
+                      >
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center gap-2">
+                            <div className="p-2 rounded-md bg-primary/10 text-primary">
+                              <Icon className="w-4 h-4" />
+                            </div>
+                            <p className="text-sm font-semibold">
+                              {lb.name || lb.leave_type}
+                            </p>
+                          </div>
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary">
+                            {percentage}%
+                          </span>
+                        </div>
+                        <div className="mb-3">
+                          <p className="text-2xl font-bold tracking-tight">
+                            {lb.remaining}
+                            <span className="text-sm font-normal text-muted-foreground ml-1">
+                              days left
+                            </span>
+                          </p>
+                        </div>
+                        <div className="flex justify-between text-xs text-muted-foreground mb-3">
+                          <span>Used: {lb.used}</span>
+                          <span>Total: {lb.total}</span>
+                        </div>
+                        {typeof lb.total === "number" && (
+                          <div className="h-2 bg-muted rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all duration-500 ${percentage > 80 ? "bg-red-500" : percentage > 60 ? "bg-amber-400" : "bg-primary"}`}
+                              style={{ width: `${percentage}%` }}
+                            />
+                          </div>
+                        )}
+                        <div className="absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100 transition pointer-events-none bg-gradient-to-r from-primary/5 to-transparent" />
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="col-span-full py-12 text-center border-2 border-dashed border-border rounded-xl">
+                    <p className="text-sm text-muted-foreground">
+                      No leave records found.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </TabsContent>
+
+            {/* ══ Emergency ═════════════════════════════════════════════════ */}
+            <TabsContent value="emergency" className="space-y-4">
+              <div className="bg-card border border-border rounded-lg">
+                <div className="px-5 py-3 border-b border-border flex items-center justify-between">
+                  <h3 className="text-sm font-semibold">Emergency Contacts</h3>
+                  <Dialog
+                    open={addContactDialog}
+                    onOpenChange={setAddContactDialog}
+                  >
+                    <DialogTrigger asChild>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="gap-1.5 press-effect"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        Add Contact
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="max-w-md">
+                      <DialogHeader>
+                        <DialogTitle>Add Emergency Contact</DialogTitle>
+                      </DialogHeader>
+                      <div className="space-y-3 pt-2">
+                        <div className="grid grid-cols-2 gap-3">
+                          {[
+                            { label: "Name *", key: "name" },
+                            { label: "Relation", key: "relation" },
+                            { label: "Phone *", key: "phone" },
+                            { label: "Email", key: "email" },
+                          ].map((f) => (
+                            <div key={f.key}>
+                              <label className="text-xs text-muted-foreground mb-1 block">
+                                {f.label}
+                              </label>
+                              <Input
+                                value={
+                                  (newContact as Record<string, string>)[f.key]
+                                }
+                                onChange={(e) =>
+                                  setNewContact({
+                                    ...newContact,
+                                    [f.key]: e.target.value,
+                                  })
+                                }
+                                className="h-8 text-sm"
+                              />
+                            </div>
+                          ))}
+                        </div>
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={isResigned}
+                            onClick={() => setAddContactDialog(false)}
+                          >
+                            Cancel
+                          </Button>
+                          <Button size="sm" onClick={handleAddContact}>
+                            Add Contact
+                          </Button>
+                        </div>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+                </div>
+                <div className="divide-y divide-border">
+                  {emergencyContacts.length === 0 && (
+                    <p className="px-5 py-6 text-sm text-muted-foreground text-center">
+                      No emergency contacts added yet.
+                    </p>
+                  )}
+                  {emergencyContacts.map((contact) => (
+                    <div key={contact.id} className="px-5 py-4">
+                      {editingContactId === contact.id ? (
+                        <div className="grid grid-cols-4 gap-2 items-end">
+                          {(["name", "relation", "phone"] as const).map(
+                            (key) => (
+                              <Input
+                                key={key}
+                                value={editContactData[key]}
+                                onChange={(e) =>
+                                  setEditContactData({
+                                    ...editContactData,
+                                    [key]: e.target.value,
+                                  })
+                                }
+                                className="h-8 text-sm"
+                                placeholder={
+                                  key.charAt(0).toUpperCase() + key.slice(1)
+                                }
+                              />
+                            ),
+                          )}
+                          <div className="flex gap-1">
+                            <Button
+                              size="sm"
+                              className="h-8"
+                              onClick={() => handleUpdateContact(contact.id)}
+                            >
+                              <Save className="w-3 h-3" />
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-8"
+                              onClick={() => setEditingContactId(null)}
+                            >
+                              <X className="w-3 h-3" />
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-4">
+                            <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center text-sm font-medium text-muted-foreground">
+                              {contact.name
+                                .split(" ")
+                                .map((n) => n[0])
+                                .join("")}
+                            </div>
+                            <div>
+                              <p className="text-sm font-medium">
+                                {contact.name}
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                {contact.relation}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-4">
+                            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                              <Phone className="w-3.5 h-3.5" />
+                              <span className="font-mono-data">
+                                {contact.phone}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                              <Mail className="w-3.5 h-3.5" />
+                              <span>{contact.email}</span>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 px-2"
+                              onClick={() => {
+                                setEditingContactId(contact.id);
+                                setEditContactData({
+                                  name: contact.name,
+                                  relation: contact.relation,
+                                  phone: contact.phone,
+                                  email: contact.email ?? "",
+                                });
+                              }}
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </Button>
+                            <button
+                              onClick={() => handleDeleteContact(contact.id)}
+                              className="p-1 rounded hover:bg-destructive/10"
+                            >
+                              <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </TabsContent>
+
+            {/* ══ Bank ══════════════════════════════════════════════════════ */}
+            <TabsContent value="bank" className="space-y-4">
+              <div className="bg-card border border-border rounded-lg p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-semibold">
+                    Bank & Salary Information
+                  </h3>
+                  <div className="flex gap-2">
+                    {editingBank && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="press-effect"
+                        onClick={() => {
+                          setBankDraft({ ...bankCommitted });
+                          setEditingBank(false);
+                        }}
+                      >
+                        <X className="w-3.5 h-3.5" />
+                        Cancel
+                      </Button>
+                    )}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5 press-effect"
+                      disabled={saving || isResigned}
+                      onClick={
+                        editingBank
+                          ? handleSaveBank
+                          : () => {
+                              setBankDraft({ ...bankCommitted });
+                              setEditingBank(true);
+                            }
+                      }
+                    >
+                      {saving && editingBank ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : editingBank ? (
+                        <Save className="w-3.5 h-3.5" />
+                      ) : (
+                        <Edit2 className="w-3.5 h-3.5" />
+                      )}
+                      {editingBank ? "Save Changes" : "Edit"}
+                    </Button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-4">
+                  {(
+                    [
+                      { label: "Bank Name", key: "bank_name" },
+                      {
+                        label: "Account Number",
+                        key: "account_number",
+                        mono: true,
+                      },
+                      { label: "Branch", key: "branch" },
+
+                      { label: "Contract Type", key: "contract_type" },
+                    ] as {
+                      label: string;
+                      key: keyof BankFormData;
+                      mono?: boolean;
+                    }[]
+                  ).map((f) => (
+                    <div key={f.key}>
+                      <p className="text-xs text-muted-foreground mb-0.5">
+                        {f.label}
+                      </p>
+                      {editingBank ? (
+                        <Input
+                          type={f.key === "salary" ? "number" : "text"}
+                          value={bankDraft[f.key]}
+                          onChange={(e) =>
+                            setBankDraft({
+                              ...bankDraft,
+                              [f.key]: e.target.value,
+                            })
+                          }
+                          className="h-8 text-sm"
+                        />
+                      ) : (
+                        <p
+                          className={`text-sm ${f.mono ? "font-mono-data" : ""}`}
+                        >
+                          {bankCommitted[f.key] || "—"}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </TabsContent>
+
+            {/* ══ Department ════════════════════════════════════════════════ */}
+            <TabsContent value="department" className="space-y-4">
+              <div className="bg-card border border-border rounded-lg p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-semibold">
+                    Department & Role Assignment
+                  </h3>
+                  <div className="flex gap-2">
+                    {editingDept && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="press-effect"
+                        onClick={() => {
+                          setDeptDraft({ ...deptCommitted });
+                          setEditingDept(false);
+                        }}
+                      >
+                        <X className="w-3.5 h-3.5" />
+                        Cancel
+                      </Button>
+                    )}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5 press-effect"
+                      disabled={saving || isResigned}
+                      onClick={
+                        editingDept
+                          ? handleSaveDept
+                          : () => {
+                              setDeptDraft({ ...deptCommitted });
+                              setEditingDept(true);
+                            }
+                      }
+                    >
+                      {saving && editingDept ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : editingDept ? (
+                        <Save className="w-3.5 h-3.5" />
+                      ) : (
+                        <Edit2 className="w-3.5 h-3.5" />
+                      )}
+                      {editingDept ? "Save Changes" : "Edit"}
+                    </Button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-4">
+                  {(
+                    [
+                      { label: "Department", key: "department" },
+                      { label: "Designation", key: "position" },
+                      { label: "Level", key: "level" },
+                      { label: "Hierarchy", key: "hierarchy" },
+                      {
+                        label: "Date of Joining",
+                        key: "joining_date",
+                        mono: true,
+                      },
+                      {
+                        label: "Previous Experience",
+                        key: "previous_experience",
+                      },
+                      { label: "Employment Type", key: "employment_type" },
+                      { label: "Employment Status", key: "employment_status" },
+                    ] as {
+                      label: string;
+                      key: keyof DeptFormData;
+                      mono?: boolean;
+                    }[]
+                  ).map((f) => (
+                    <div key={f.key}>
+                      <p className="text-xs text-muted-foreground mb-0.5">
+                        {f.label}
+                      </p>
+                      {editingDept ? (
+                        f.key === "employment_status" ? (
+                          <p className="text-sm">{empStatus}</p>
+                        ) : (
+                          <Input
+                            type={f.key === "joining_date" ? "date" : "text"}
+                            value={deptDraft[f.key]}
+                            onChange={(e) =>
+                              setDeptDraft({
+                                ...deptDraft,
+                                [f.key]: e.target.value,
+                              })
+                            }
+                            className="h-8 text-sm"
+                          />
+                        )
+                      ) : (
+                        <p
+                          className={`text-sm ${f.mono ? "font-mono-data" : ""}`}
+                        >
+                          {f.key === "employment_status"
+                            ? empStatus
+                            : deptCommitted[f.key] || "—"}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </TabsContent>
+
+            {/* ══ Assets ════════════════════════════════════════════════════ */}
+            <TabsContent value="assets" className="space-y-4">
+              <div className="bg-card border border-border rounded-lg">
+                <div className="px-5 py-3 border-b border-border flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold">My Assets</h3>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Assets allocated to you
+                    </p>
+                  </div>
+                  <Dialog
+                    open={assetRequestDialog}
+                    onOpenChange={setAssetRequestDialog}
+                  >
+                    <DialogTrigger asChild>
+                      <Button size="sm" className="gap-1.5 press-effect">
+                        <Plus className="w-3.5 h-3.5" />
+                        Request Asset
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>Request New Asset</DialogTitle>
+                      </DialogHeader>
+                      <div className="space-y-4 pt-2">
+                        <div>
+                          <label className="text-xs text-muted-foreground mb-1 block">
+                            Asset Type
+                          </label>
+                          <Select
+                            value={assetRequest.type}
+                            onValueChange={(v) =>
+                              setAssetRequest({ ...assetRequest, type: v })
+                            }
+                          >
+                            <SelectTrigger className="h-9 text-sm">
+                              <SelectValue placeholder="Select type" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {[
+                                "Laptop",
+                                "Monitor",
+                                "Keyboard",
+                                "Mouse",
+                                "Mobile",
+                                "Headset",
+                                "Other",
+                              ].map((t) => (
+                                <SelectItem key={t} value={t}>
+                                  {t}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div>
+                          <label className="text-xs text-muted-foreground mb-1 block">
+                            Asset Name
+                          </label>
+                          <Input
+                            value={assetRequest.name}
+                            onChange={(e) =>
+                              setAssetRequest({
+                                ...assetRequest,
+                                name: e.target.value,
+                              })
+                            }
+                            placeholder="e.g., MacBook Pro 16 inch"
+                            className="h-9 text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs text-muted-foreground mb-1 block">
+                            Reason
+                          </label>
+                          <Textarea
+                            value={assetRequest.reason}
+                            onChange={(e) =>
+                              setAssetRequest({
+                                ...assetRequest,
+                                reason: e.target.value,
+                              })
+                            }
+                            placeholder="Why do you need this asset?"
+                            className="text-sm min-h-[80px]"
+                          />
+                        </div>
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setAssetRequestDialog(false)}
+                          >
+                            Cancel
+                          </Button>
+                          <Button size="sm" onClick={handleRequestAsset}>
+                            Submit Request
+                          </Button>
+                        </div>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+                </div>
+                <table className="nexus-table">
+                  <thead>
+                    <tr>
+                      <th>Asset ID</th>
+                      <th>Name</th>
+                      <th>Category</th>
+                      <th>Serial Number</th>
+                      <th>Assigned</th>
+                      <th>Status</th>
+                      <th className="w-16"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {employeeAssets.length === 0 && (
+                      <tr>
+                        <td
+                          colSpan={7}
+                          className="text-center text-sm text-muted-foreground py-6"
+                        >
+                          No assets assigned yet.
+                        </td>
+                      </tr>
+                    )}
+                    {employeeAssets.map((asset) => (
+                      <tr key={asset.id}>
+                        <td className="text-xs font-mono-data text-muted-foreground">
+                          {asset.asset_id}
+                        </td>
+                        <td className="text-sm font-medium">{asset.name}</td>
+                        <td className="text-xs text-muted-foreground">
+                          {asset.category ?? asset.type}
+                        </td>
+                        <td className="text-xs font-mono-data text-muted-foreground">
+                          {asset.serial_number || "—"}
+                        </td>
+                        <td className="text-xs font-mono-data text-muted-foreground">
+                          {toDateStr(asset.purchase_date) || "—"}
+                        </td>
+                        <td>
+                          <span
+                            className={`status-pill ${asset.status === "assigned" ? "status-active" : "status-pending"}`}
+                          >
+                            {asset.status}
+                          </span>
+                        </td>
+                        <td>
+                          {asset.status === "assigned" && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              disabled={isResigned}
+                              className="h-7 px-2 text-xs text-muted-foreground"
+                              onClick={() => handleReturnAsset(asset.id)}
+                            >
+                              Return
+                            </Button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </TabsContent>
+            {/* ══ Security ══════════════════════════════════════════════════ */}
+            <TabsContent value="security" className="space-y-4">
+              <div className="bg-card border border-border rounded-lg p-5 max-w-md">
+                <h3 className="text-sm font-semibold mb-4">Change Password</h3>
+                <div className="space-y-3">
+                  {[
+                    { label: "Current Password", key: "currentPassword" },
+                    { label: "New Password", key: "newPassword" },
+                    { label: "Confirm New Password", key: "confirmPassword" },
+                  ].map((f) => (
+                    <div key={f.key}>
+                      <p className="text-xs text-muted-foreground mb-1">
+                        {f.label}
+                      </p>
+                      <div className="relative">
+                        <Input
+                          type={
+                            showPasswords[f.key as keyof typeof showPasswords]
+                              ? "text"
+                              : "password"
+                          }
+                          value={
+                            passwordForm[f.key as keyof typeof passwordForm]
+                          }
+                          onChange={(e) =>
+                            setPasswordForm({
+                              ...passwordForm,
+                              [f.key]: e.target.value,
+                            })
+                          }
+                          className="h-8 text-sm pr-8"
+                          placeholder={f.label}
+                        />
+                        <button
+                          type="button"
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                          onClick={() =>
+                            setShowPasswords((prev) => ({
+                              ...prev,
+                              [f.key]: !prev[f.key as keyof typeof prev],
+                            }))
+                          }
+                        >
+                          {showPasswords[
+                            f.key as keyof typeof showPasswords
+                          ] ? (
+                            <EyeOff className="w-3.5 h-3.5" />
+                          ) : (
+                            <Eye className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+
+                  {passwordError && (
+                    <p className="text-xs text-destructive flex items-center gap-1">
+                      <AlertCircle className="w-3.5 h-3.5" />
+                      {passwordError}
+                    </p>
+                  )}
+
+                  <Button
+                    size="sm"
+                    className="w-full gap-1.5 mt-2"
+                    disabled={changingPassword}
+                    onClick={handleChangePassword}
+                  >
+                    {changingPassword ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <KeyRound className="w-3.5 h-3.5" />
+                    )}
+                    Change Password
+                  </Button>
+                </div>
+              </div>
+            </TabsContent>
+          </Tabs>
+        </motion.div>
       </motion.div>
-    </motion.div>
+    </Protected>
   );
 }

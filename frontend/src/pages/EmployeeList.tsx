@@ -41,6 +41,8 @@ import { useRole } from "@/contexts/RoleContext";
 import { useToast } from "@/hooks/use-toast";
 import { apiClient, ApiResponse } from "@/services/apiClient";
 import { useAuth } from "@/contexts/AuthContext";
+import { EmployeesAction } from "@/permissions/permission";
+import { Protected } from "@/components/common/ProtectedRoute";
 
 const container = {
   hidden: { opacity: 0 },
@@ -54,14 +56,8 @@ const item = {
     transition: { duration: 0.25, ease: [0.2, 0, 0, 1] },
   },
 };
+type EmployeeStatus = "active" | "notice_period" | "resigned";
 
-type EmployeeStatus =
-  | "Active"
-  | "Onboarding"
-  | "On Leave"
-  | "Resigned"
-  | "Inactive"
-  | "Notice Period";
 interface Employee {
   employee_id: string;
   id: string;
@@ -73,17 +69,15 @@ interface Employee {
   profile_image: string;
   position?: string;
   joining_date?: string;
-  status?: EmployeeStatus;
+  employment_status?: EmployeeStatus;
+  phone?: string;
   type?: "Full-time" | "Contract" | "Part-time";
 }
 
 const statusClass: Record<EmployeeStatus, string> = {
-  Active: "status-active",
-  Onboarding: "status-pending",
-  "On Leave": "status-pending",
-  Resigned: "status-resigned",
-  Inactive: "status-inactive",
-  "Notice Period": "status-notice",
+  active: "active",
+  notice_period: "notice_period",
+  resigned: "resigned",
 };
 interface EmployeeAPI {
   id: string;
@@ -96,6 +90,7 @@ interface EmployeeAPI {
   profile_image?: string;
   position?: string;
   joining_date?: string;
+  employment_status?: string;
 }
 
 const departments = [
@@ -107,14 +102,7 @@ const departments = [
   "Design",
   "Support",
 ];
-const statuses: EmployeeStatus[] = [
-  "Active",
-  "Onboarding",
-  "On Leave",
-  "Notice Period",
-  "Resigned",
-  "Inactive",
-];
+
 const types = ["Full-time", "Contract", "Part-time"];
 
 export default function EmployeeList() {
@@ -155,8 +143,13 @@ export default function EmployeeList() {
 
         const data = response.data ?? [];
 
-        const normalizedEmployees: Employee[] = (data as EmployeeAPI[]).map(
-          (emp) => ({
+        const normalizedEmployees: Employee[] = (data as EmployeeAPI[])
+          .filter(
+            (emp) =>
+              emp.employment_status === "active" ||
+              emp.employment_status === "notice_period",
+          )
+          .map((emp) => ({
             id: emp.id,
             employee_id: emp.employee_id,
             name: `${emp.first_name} ${emp.last_name}`.trim(),
@@ -165,8 +158,9 @@ export default function EmployeeList() {
             department: emp.department ?? "—",
             position: emp.position ?? "—",
             joining_date: emp.joining_date ?? "",
-          }),
-        );
+            phone: emp.phone ?? "",
+            employment_status: emp.employment_status as EmployeeStatus,
+          }));
 
         setEmployees(normalizedEmployees);
       } catch (error) {
@@ -189,7 +183,8 @@ export default function EmployeeList() {
         e.id.toLowerCase().includes(q) ||
         e.department?.toLowerCase().includes(q);
       const matchDept = filterDept === "all" || e.department === filterDept;
-      const matchStatus = filterStatus === "all" || e.status === filterStatus;
+      const matchStatus =
+        filterStatus === "all" || e.employment_status === filterStatus;
       const matchType =
         filterType === "all" || (e.type ?? "Full-time") === filterType;
 
@@ -244,6 +239,7 @@ export default function EmployeeList() {
         position: data.position,
         date_of_birth: data.date_of_birth,
         employment_type: data.employment_type,
+        employment_status: data.employment_status,
         phone: data.phone,
       };
 
@@ -313,7 +309,7 @@ export default function EmployeeList() {
             employees
           </p>
         </div>
-        {isHR && (
+        <Protected allPermissions={[EmployeesAction.Create]}>
           <Dialog open={addDialog} onOpenChange={setAddDialog}>
             <DialogTrigger asChild>
               <Button size="sm" className="gap-1.5 press-effect">
@@ -502,7 +498,7 @@ export default function EmployeeList() {
               </div>
             </DialogContent>
           </Dialog>
-        )}
+        </Protected>
       </motion.div>
 
       {/* Search + Filters */}
@@ -635,16 +631,13 @@ export default function EmployeeList() {
                 <th>Position</th>
                 <th>Email</th>
                 <th>Joined</th>
+                <th>Status</th>
                 <th className="w-10"></th>
               </tr>
             </thead>
             <tbody>
               {filtered.map((emp) => (
-                <tr
-                  key={emp.id}
-                  className="cursor-pointer"
-                  onClick={() => navigate(`/employees/${emp.id}`)}
-                >
+                <tr key={emp.id} className="cursor-pointer">
                   <td className="font-mono-data text-xs text-muted-foreground">
                     {emp.employee_id}
                   </td>
@@ -682,34 +675,47 @@ export default function EmployeeList() {
                   </td>
                   <td className="text-sm text-muted-foreground">{emp.email}</td>
                   <td className="font-mono-data text-xs text-muted-foreground">
-                    {emp.joining_date?.split("T")[0] || "—"}
+                    {emp.phone || "__"}
                   </td>
-                  <td onClick={(e) => e.stopPropagation()}>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <button className="p-1 rounded hover:bg-muted transition-colors">
-                          <MoreHorizontal className="w-4 h-4 text-muted-foreground" />
-                        </button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-44">
-                        <DropdownMenuItem
-                          onClick={() => navigate(`/employees/${emp.id}`)}
-                        >
-                          View Profile
-                        </DropdownMenuItem>
-                        <DropdownMenuItem>View Documents</DropdownMenuItem>
-                        <DropdownMenuItem>View Attendance</DropdownMenuItem>
-                        {isHR && (
+                  <td>
+                    <span
+                      className={`status-pill ${statusClass[emp.employment_status ?? "active"]}`}
+                    >
+                      {emp.employment_status?.replace("_", " ") || "active"}
+                    </span>
+                  </td>
+                  <Protected
+                    anyPermissions={[
+                      EmployeesAction.Edit,
+                      EmployeesAction.Delete,
+                    ]}
+                  >
+                    <td onClick={(e) => e.stopPropagation()}>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button className="p-1 rounded hover:bg-muted transition-colors">
+                            <MoreHorizontal className="w-4 h-4 text-muted-foreground" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-44">
+                          <DropdownMenuItem
+                            onClick={() => navigate(`/employees/${emp.id}`)}
+                          >
+                            View Profile
+                          </DropdownMenuItem>
+                          <DropdownMenuItem>View Documents</DropdownMenuItem>
+                          <DropdownMenuItem>View Attendance</DropdownMenuItem>
+
                           <DropdownMenuItem
                             className="text-destructive"
                             onClick={() => handleDeleteEmployee(emp.id)}
                           >
                             Delete Employee
                           </DropdownMenuItem>
-                        )}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </td>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </td>
+                  </Protected>
                 </tr>
               ))}
               {filtered.length === 0 && !loading && (

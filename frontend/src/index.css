@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap");
 
 @tailwind base;
 @tailwind components;
@@ -50,7 +50,12 @@
     --sidebar-border: 240 10% 92%;
     --sidebar-ring: 258 58% 52%;
 
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-family:
+      "Inter",
+      -apple-system,
+      BlinkMacSystemFont,
+      "Segoe UI",
+      sans-serif;
   }
 
   .dark {
@@ -105,10 +110,17 @@
 
   body {
     @apply bg-background text-foreground antialiased;
-    transition: background-color 0.3s ease, color 0.3s ease;
+    transition:
+      background-color 0.3s ease,
+      color 0.3s ease;
   }
 
-  h1, h2, h3, h4, h5, h6 {
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
     letter-spacing: -0.025em;
     @apply tracking-tight font-semibold;
   }
@@ -116,7 +128,7 @@
 
 @layer components {
   .font-mono-data {
-    font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+    font-family: "JetBrains Mono", "SF Mono", "Fira Code", monospace;
     font-variant-numeric: tabular-nums;
   }
 
@@ -129,26 +141,28 @@
     color: hsl(var(--success));
     border-color: hsl(var(--success) / 0.2);
   }
-
+  .active {
+    background: hsl(var(--success) / 0.1);
+    color: hsl(var(--success));
+    border-color: hsl(var(--success) / 0.2);
+  }
   .status-pending {
     background: hsl(var(--warning) / 0.1);
     color: hsl(var(--warning));
     border-color: hsl(var(--warning) / 0.2);
   }
-
-  .status-inactive {
-    background: hsl(var(--muted-foreground) / 0.1);
-    color: hsl(var(--muted-foreground));
-    border-color: hsl(var(--muted-foreground) / 0.15);
-  }
-
   .status-resigned {
     background: hsl(var(--destructive) / 0.08);
     color: hsl(var(--destructive));
     border-color: hsl(var(--destructive) / 0.2);
   }
+  .resigned {
+    background: hsl(var(--destructive) / 0.08);
+    color: hsl(var(--destructive));
+    border-color: hsl(var(--destructive) / 0.2);
+  }
 
-  .status-notice {
+  .notice_period {
     background: hsl(var(--accent) / 0.1);
     color: hsl(var(--accent));
     border-color: hsl(var(--accent) / 0.2);

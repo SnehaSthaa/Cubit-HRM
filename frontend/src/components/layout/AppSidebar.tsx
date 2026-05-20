@@ -9,12 +9,11 @@ import {
   BarChart3,
   Shield,
   Package,
-  Settings,
   Sun,
   Moon,
   ChevronDown,
   DollarSign,
-  Image,
+  Eye,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme } from "./ThemeProvider";
@@ -25,79 +24,101 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import logo from "@/assets/logo.png";
+import {
+  DashboardAction,
+  EmployeesAction,
+  AttendanceAction,
+  LeaveManagementAction,
+  PayrollAction,
+  AssetsAction,
+  OffboardingAction,
+  ReportsAction,
+  RolesandAccessAction,
+  EmployeeSelfServiceAction,
+} from "@/permissions/permission"; // ← frontend copy, not backend path
 
-const adminNav = [
+const ALL_NAV = [
   {
-    label: "Overview",
-    items: [{ to: "/", icon: LayoutDashboard, label: "Dashboard" }],
-  },
-  {
-    label: "Operations",
+    group: "Overview",
     items: [
-      { to: "/employees", icon: Users, label: "Employees" },
-      { to: "/attendance", icon: Clock, label: "Attendance" },
-      { to: "/leave", icon: CalendarDays, label: "Leave" },
-      { to: "/payroll", icon: DollarSign, label: "Payroll" },
+      {
+        to: "/",
+        icon: LayoutDashboard,
+        label: "Dashboard",
+        action: DashboardAction.View,
+      },
     ],
   },
   {
-    label: "Self-Service",
-    items: [{ to: "/ess", icon: FileText, label: "My Profile" }],
-  },
-  {
-    label: "Administration",
+    group: "Operations",
     items: [
-      { to: "/assets", icon: Package, label: "Assets" },
-      { to: "/offboarding", icon: LogOut, label: "Offboarding" },
-      { to: "/reports", icon: BarChart3, label: "Reports" },
-      { to: "/roles", icon: Shield, label: "Roles & Access" },
+      {
+        to: "/employees",
+        icon: Users,
+        label: "Employees",
+        action: EmployeesAction.View,
+      },
+      {
+        to: "/attendance",
+        icon: Clock,
+        label: "Attendance",
+        action: AttendanceAction.View,
+      },
+      {
+        to: "/leave",
+        icon: CalendarDays,
+        label: "Leave",
+        action: LeaveManagementAction.View,
+      },
+      {
+        to: "/payroll",
+        icon: DollarSign,
+        label: "Payroll",
+        action: PayrollAction.View,
+      },
     ],
   },
-];
-
-const hrNav = [
   {
-    label: "Overview",
-    items: [{ to: "/", icon: LayoutDashboard, label: "Dashboard" }],
-  },
-  {
-    label: "Operations",
+    group: "Self-Service",
     items: [
-      { to: "/employees", icon: Users, label: "Employees" },
-      { to: "/attendance", icon: Clock, label: "Attendance" },
-      { to: "/leave", icon: CalendarDays, label: "Leave" },
-      { to: "/payroll", icon: DollarSign, label: "Payroll" },
+      {
+        to: "/ess",
+        icon: FileText,
+        label: "My Profile",
+        action: EmployeeSelfServiceAction.View,
+      },
     ],
   },
   {
-    label: "Self-Service",
-    items: [{ to: "/ess", icon: FileText, label: "My Profile" }],
-  },
-  {
-    label: "Management",
+    group: "Administration",
     items: [
-      { to: "/assets", icon: Package, label: "Assets" },
-      { to: "/offboarding", icon: LogOut, label: "Offboarding" },
-      { to: "/reports", icon: BarChart3, label: "Reports" },
-    ],
-  },
-];
-
-const employeeNav = [
-  {
-    label: "Overview",
-    items: [{ to: "/", icon: LayoutDashboard, label: "Dashboard" }],
-  },
-  {
-    label: "Self-Service",
-    items: [
-      { to: "/ess", icon: FileText, label: "My Profile" },
-      { to: "/attendance", icon: Clock, label: "My Attendance" },
-      { to: "/leave", icon: CalendarDays, label: "Leave" },
-      { to: "/payroll", icon: DollarSign, label: "My Payslips" },
-      { to: "/assets", icon: Package, label: "My Assets" },
+      {
+        to: "/assets",
+        icon: Package,
+        label: "Assets",
+        action: AssetsAction.View,
+      },
+      {
+        to: "/offboarding",
+        icon: LogOut,
+        label: "Offboarding",
+        action: OffboardingAction.View,
+      },
+      {
+        to: "/reports",
+        icon: BarChart3,
+        label: "Reports",
+        action: ReportsAction.View,
+      },
+      {
+        to: "/roles",
+        icon: Shield,
+        label: "Roles & Access",
+        action: RolesandAccessAction.View,
+      },
     ],
   },
 ];
@@ -108,31 +129,23 @@ const roleLabels: Record<UserRole, string> = {
   employee: "Employee",
 };
 
-const roleInitials: Record<UserRole, string> = {
-  super_admin: "SA",
-  hr_admin: "HR",
-  employee: "AB",
-};
-
-const roleEmails: Record<UserRole, string> = {
-  super_admin: "admin@cubit.io",
-  hr_admin: "hr@cubit.io",
-  employee: "aarav@cubit.io",
-};
-
 export function AppSidebar() {
   const location = useLocation();
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
-  const { role, setRole } = useRole();
+  const {
+    role,
+    activeRole,
+    requireAllPermission,
+    previewRole,
+    setPreviewRole,
+  } = useRole();
   const { user, logout } = useAuth();
 
-  const navGroups =
-    role === "super_admin"
-      ? adminNav
-      : role === "hr_admin"
-        ? hrNav
-        : employeeNav;
+  const navGroups = ALL_NAV.map((group) => ({
+    ...group,
+    items: group.items.filter((item) => requireAllPermission([item.action])),
+  })).filter((group) => group.items.length > 0);
 
   const handleLogout = () => {
     logout();
@@ -154,9 +167,9 @@ export function AppSidebar() {
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-5">
         {navGroups.map((group) => (
-          <div key={group.label}>
+          <div key={group.group}>
             <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/70 font-semibold px-3 mb-2">
-              {group.label}
+              {group.group}
             </p>
             <div className="space-y-0.5">
               {group.items.map((navItem) => {
@@ -189,49 +202,77 @@ export function AppSidebar() {
 
       {/* Footer */}
       <div className="p-3 border-t border-sidebar-border space-y-2">
-        {/* Role Switcher (demo) */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-[12px] text-muted-foreground hover:bg-sidebar-accent/70 transition-colors border border-dashed border-border">
-              <span>
-                Role:{" "}
-                <span className="font-medium text-foreground">
-                  {roleLabels[role]}
-                </span>
-              </span>
-              <ChevronDown className="w-3 h-3" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-48">
-            <DropdownMenuItem onClick={() => setRole("super_admin")}>
-              <span
-                className={
-                  role === "super_admin" ? "font-semibold text-primary" : ""
-                }
+        {/* View As — only real super_admin sees this */}
+        {role === "super_admin" && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                className={cn(
+                  "w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-[12px] transition-colors border border-dashed",
+                  previewRole
+                    ? "border-primary/50 text-primary bg-primary/5"
+                    : "border-border text-muted-foreground hover:bg-sidebar-accent/70",
+                )}
+              >
+                <div className="flex items-center gap-1.5">
+                  <Eye className="w-3 h-3" />
+                  <span>
+                    View as:{" "}
+                    <span className="font-medium text-foreground">
+                      {roleLabels[activeRole]}
+                    </span>
+                  </span>
+                </div>
+                <ChevronDown className="w-3 h-3" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-48">
+              <DropdownMenuItem
+                onClick={() => setPreviewRole(null)}
+                className={cn(!previewRole && "font-semibold text-primary")}
               >
                 Super Admin
-              </span>
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setRole("hr_admin")}>
-              <span
-                className={
-                  role === "hr_admin" ? "font-semibold text-primary" : ""
-                }
-              >
-                HR / Admin
-              </span>
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setRole("employee")}>
-              <span
-                className={
-                  role === "employee" ? "font-semibold text-primary" : ""
-                }
-              >
-                Employee
-              </span>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+                {!previewRole && (
+                  <span className="ml-auto text-[10px] text-muted-foreground">
+                    actual
+                  </span>
+                )}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              {(["hr_admin", "employee"] as UserRole[]).map((r) => (
+                <DropdownMenuItem
+                  key={r}
+                  onClick={() => setPreviewRole(r)}
+                  className={cn(
+                    previewRole === r && "font-semibold text-primary",
+                  )}
+                >
+                  {roleLabels[r]}
+                  {previewRole === r && (
+                    <span className="ml-auto text-[10px] text-muted-foreground">
+                      preview
+                    </span>
+                  )}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+
+        {/* Preview banner */}
+        {previewRole && (
+          <div className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-primary/10 border border-primary/20">
+            <span className="text-[11px] text-primary font-medium">
+              Previewing: {roleLabels[previewRole]}
+            </span>
+            <button
+              onClick={() => setPreviewRole(null)}
+              className="text-[10px] text-primary underline underline-offset-2"
+            >
+              Exit
+            </button>
+          </div>
+        )}
 
         {/* Theme Toggle */}
         <button
@@ -248,15 +289,23 @@ export function AppSidebar() {
 
         {/* User + Logout */}
         <div className="flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-sidebar-accent/70 transition-colors">
-          <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary">
-            {user?.name?.charAt(0)?.toUpperCase() || roleInitials[role]}
+          <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary overflow-hidden shrink-0">
+            {user?.profile_image ? (
+              <img
+                src={`${user.profile_image}?t=${Date.now()}`}
+                alt={user?.name}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              (user?.name?.charAt(0)?.toUpperCase() ?? "U")
+            )}
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-[13px] font-medium text-foreground truncate">
-              {user?.name || roleLabels[role]}
+              {user?.name}
             </p>
             <p className="text-[11px] text-muted-foreground truncate">
-              {user?.email || roleEmails[role]}
+              {roleLabels[role]}
             </p>
           </div>
           <button

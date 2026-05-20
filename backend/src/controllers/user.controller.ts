@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import { prisma } from "../db/prisma.js";
 import { JwtPayload } from "@/types/index.js";
 import bcrypt from "bcryptjs";
+import { allPermission } from "@/permissions/allowed-permission.js";
 
 export class UserController {
   static async getMe(req: Request, res: Response) {
@@ -45,6 +46,8 @@ export class UserController {
         });
       }
 
+      const permissions = allPermission[user.role] || [];
+
       return res.status(200).json({
         success: true,
         data: {
@@ -55,6 +58,7 @@ export class UserController {
             phone: user.phone,
             role: user.role,
             is_active: user.is_active,
+            permissions,
           },
           employee: user.employee ?? null,
         },

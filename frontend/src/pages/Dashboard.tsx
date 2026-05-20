@@ -8,6 +8,7 @@ import {
   ArrowUpRight,
   Calendar as CalendarIcon,
   CakeIcon,
+  ArrowRight,
 } from "lucide-react";
 import { Calendar } from "@/components/ui/calendar";
 import { useRole } from "@/contexts/RoleContext";
@@ -26,6 +27,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { SelectTrigger } from "@radix-ui/react-select";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { Protected } from "@/components/common/ProtectedRoute";
+import { DashboardAction } from "@/permissions/permission";
 
 const container = {
   hidden: { opacity: 0 },
@@ -61,9 +70,9 @@ type EmployeeWithBirthday = Employee & {
   daysLeft: number;
 };
 const leaveStatusClass: Record<string, string> = {
-  "Paid Leave": "status-active",
-  "Sick Leave": "status-pending",
-  "Unpaid Leave": "status-notice",
+  "Paid Leave": "paid",
+  "Sick Leave": "sick",
+  "Unpaid Leave": "unpaid",
   Vacation: "status-active",
   Personal: "status-pending",
   Maternity: "status-active",
@@ -313,15 +322,14 @@ export default function Dashboard() {
           }))
         : [];
 
-      // Use employment_status field from the global Employee type
-      const activeEmployees = employees.filter(
-        (e) =>
-          !e.employment_status ||
-          e.employment_status.toLowerCase() !== "pending_offboarding",
-      );
-      const pendingOffboarding = employees.filter(
-        (e) => e.employment_status?.toLowerCase() === "pending_offboarding",
-      );
+      const activeEmployees = employees.filter((e) => {
+        const status = (e.employment_status ?? "active").toLowerCase();
+        return status === "active";
+      });
+
+      const pendingOffboarding = employees.filter((e) => {
+        return (e.employment_status ?? "").toLowerCase() === "notice_period";
+      });
 
       setStats([
         {
@@ -366,23 +374,60 @@ export default function Dashboard() {
       setLoading(false);
     }
   };
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const leaveDates = allLeaves
+    .filter((l) => (l.status ?? "").toLowerCase() === "approved")
+    .flatMap((l) => {
+      if (!l.start_date || !l.end_date) return [];
+
+      const start = new Date(l.start_date);
+      const end = new Date(l.end_date);
+
+      start.setHours(0, 0, 0, 0);
+      end.setHours(0, 0, 0, 0);
+
+      if (end < today) return [];
+
+      const dates: Date[] = [];
+      const temp = new Date(start < today ? today : start);
+
+      while (temp <= end) {
+        dates.push(new Date(temp));
+        temp.setDate(temp.getDate() + 1);
+      }
+
+      return dates;
+    });
+
   const fetchBirthdays = async () => {
     try {
       const res = await apiClient.getEmployees();
-      const employees = res.data ?? [];
+      const employees = Array.isArray(res.data) ? res.data : [];
+
       const today = new Date();
+
       const upcomming = employees
+        .filter((e) => {
+          const status = (e.employment_status ?? "").toLowerCase();
+          return ["active", "notice_period"].includes(status);
+        })
+
         .filter((e) => e.date_of_birth)
         .map((e) => {
           const dob = new Date(e.date_of_birth);
+
           const nextBirthday = new Date(
             today.getFullYear(),
             dob.getMonth(),
             dob.getDate(),
           );
+
           if (nextBirthday < today) {
             nextBirthday.setFullYear(today.getFullYear() + 1);
           }
+
           return {
             ...e,
             nextBirthday,
@@ -392,8 +437,8 @@ export default function Dashboard() {
             ),
           };
         })
-        .sort((a, b) => a.daysLeft - b.daysLeft)
-        .slice(0, 5);
+        .sort((a, b) => a.daysLeft - b.daysLeft);
+
       setBirthdays(upcomming);
     } catch (err) {
       console.log(err);
@@ -466,19 +511,61 @@ export default function Dashboard() {
     }
   };
 
+  const toStartOfDay = (d: Date) => {
+    const nd = new Date(d);
+    nd.setHours(0, 0, 0, 0);
+    return nd;
+  };
+
   const holidayDates = upcomingHolidays.flatMap((h) => {
     if (!h.start_date || !h.end_date) return [];
-    const start = new Date(h.start_date);
-    const end = new Date(h.end_date);
-    if (isNaN(start.getTime()) || isNaN(end.getTime())) return [];
+
+    const start = toStartOfDay(new Date(h.start_date));
+    const end = toStartOfDay(new Date(h.end_date));
+
     const dates: Date[] = [];
     const temp = new Date(start);
+
     while (temp <= end) {
-      dates.push(new Date(temp));
+      dates.push(toStartOfDay(temp));
       temp.setDate(temp.getDate() + 1);
     }
+
     return dates;
   });
+  const getDayInfo = (date: Date) => {
+    const current = toStartOfDay(date);
+
+    const holiday = upcomingHolidays.find((h) => {
+      if (!h.start_date || !h.end_date) return false;
+
+      const start = toStartOfDay(new Date(h.start_date));
+      const end = toStartOfDay(new Date(h.end_date));
+
+      return current >= start && current <= end;
+    });
+
+    const leave = allLeaves.find((l) => {
+      if ((l.status ?? "").toLowerCase() !== "approved") return false;
+      if (!l.start_date || !l.end_date) return false;
+
+      const start = toStartOfDay(new Date(l.start_date));
+      const end = toStartOfDay(new Date(l.end_date));
+
+      return current >= start && current <= end;
+    });
+
+    if (holiday)
+      return <p className="text-red-700"> Holiday: {holiday.name}</p>;
+    if (leave)
+      return (
+        <p className="text-green-700">
+          {leave.employee?.first_name} {leave.employee?.last_name} is on leave
+        </p>
+      );
+
+    return null;
+  };
 
   return (
     <motion.div
@@ -568,7 +655,7 @@ export default function Dashboard() {
                     </div>
                   </div>
                   <span
-                    className={`status-pill ${leaveStatusClass[l.leave_type || ""] || "status-pending"}`}
+                    className={`status-pill ${leaveStatusClass[l.status || ""] || "status-pending"}`}
                   >
                     {l.leave_type || "Leave"}
                   </span>
@@ -593,17 +680,71 @@ export default function Dashboard() {
             </button>
           </div>
           {showCalendar ? (
-            <div className="p-3 flex justify-center">
-              <Calendar
-                mode="single"
-                selected={calendarDate}
-                onSelect={setCalendarDate}
-                modifiers={{ holiday: holidayDates }}
-                modifiersClassNames={{
-                  holiday:
-                    "font-bold rounded-full relative text-black after:content-[''] after:absolute after:bottom-1 after:left-1/2 after:-translate-x-1/2 after:w-1.5 after:h-1.5 after:bg-red-500 after:rounded-full",
-                }}
-              />
+            <div className="p-3 flex flex-col ">
+              <TooltipProvider>
+                <Calendar
+                  className=" flex items-center justify-center"
+                  mode="single"
+                  selected={calendarDate}
+                  onSelect={setCalendarDate}
+                  modifiers={{
+                    holiday: holidayDates,
+                    leave: leaveDates,
+                    weekend: (date) => {
+                      const day = date.getDay();
+                      return day === 0 || day === 6;
+                    },
+                  }}
+                  modifiersClassNames={{
+                    holiday:
+                      "text-red-600 font-semibold bg-red-50 rounded-md border border-red-100",
+                    leave:
+                      "text-green-600 font-semibold bg-green-50 rounded-md border border-green-200",
+                    weekend:
+                      "text-red-600 font-semibold bg-red-50 rounded-md border border-red-100",
+                  }}
+                  components={{
+                    DayContent: ({ date }) => {
+                      const info = getDayInfo(date);
+
+                      return (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <div className="relative w-full h-full flex items-center justify-center cursor-pointer">
+                              {date.getDate()}
+                            </div>
+                          </TooltipTrigger>
+
+                          {info && (
+                            <TooltipContent side="top" className="text-xs">
+                              {info}
+                            </TooltipContent>
+                          )}
+                        </Tooltip>
+                      );
+                    },
+                  }}
+                />
+              </TooltipProvider>
+              <div className="mt-3 border-t border-border pt-3">
+                <div className="space-y-2 ml-10">
+                  {/* Holiday */}
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-red-500" />
+                      <span className="text-xs font-medium">Holiday</span>
+                    </div>
+                  </div>
+
+                  {/* Leave */}
+                  <div className="flex ">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-green-500" />
+                      <span className="text-xs font-medium">Leave</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           ) : (
             <div className="p-2">
@@ -660,7 +801,10 @@ export default function Dashboard() {
         </motion.div>
 
         {/* Pending Actions */}
-        {isHR && (
+
+        <Protected
+          allPermissions={[DashboardAction.Edit, DashboardAction.Edit]}
+        >
           <motion.div variants={item} className="glass-card overflow-hidden">
             <div className="flex items-center justify-between px-5 py-4 border-b border-border">
               <h2 className="text-sm font-semibold">Pending Actions</h2>
@@ -726,7 +870,7 @@ export default function Dashboard() {
               </div>
             )}
           </motion.div>
-        )}
+        </Protected>
 
         {/* Reject Dialog */}
         <Dialog open={rejectDialog} onOpenChange={setRejectDialog}>

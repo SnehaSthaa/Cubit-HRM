@@ -13,6 +13,8 @@ export interface UserProfile {
   name: string;
   avatar?: string;
   role: "super_admin" | "hr_admin" | "employee";
+  profile_image?: string;
+  permissions: string[];
 }
 
 interface AuthContextValue {
@@ -24,39 +26,48 @@ interface AuthContextValue {
   loginWithGoogle: () => Promise<void>;
   logout: () => void;
   forgotPassword: (email: string) => Promise<void>;
+  updateUser: (partial: Partial<UserProfile>) => void;
+  hasPermission: (perm: string) => boolean;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+
+// Shared helper — given a token already stored in localStorage,
+// fetches /me and returns a fully-populated UserProfile.
+async function fetchProfile(): Promise<UserProfile> {
+  const meResponse = await apiClient.getMe();
+  if (!meResponse.success || !meResponse.data) {
+    throw new Error("Failed to load user profile");
+  }
+  const { user, employee } = meResponse.data;
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    profile_image: employee?.profile_image ?? undefined,
+    permissions: user.permissions ?? [],
+  };
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Rehydrate session on mount
   useEffect(() => {
     const initializeAuth = async () => {
-      const stored = localStorage.getItem("access_token");
-
-      if (stored) {
+      const token = localStorage.getItem("access_token");
+      if (token) {
         try {
-          const response = await apiClient.getMe();
-
-          if (response.success && response.data) {
-            const { user } = response.data;
-
-            const profile: UserProfile = {
-              id: user.id,
-              email: user.email,
-              name: user.name,
-              role: user.role,
-            };
-
-            setUser(profile);
-          }
-        } catch (error) {
+          const profile = await fetchProfile();
+          setUser(profile);
+        } catch {
+          // Token is invalid or expired — clear everything
           localStorage.removeItem("access_token");
+          localStorage.removeItem("cubit-auth-user");
         }
       }
-
       setIsLoading(false);
     };
 
@@ -70,57 +81,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const login = async (email: string, password: string) => {
-    try {
-      const response = await apiClient.login(email, password);
-
-      if (!response.success || !response.data) {
-        throw new Error(response.message || "Login failed");
-      }
-
-      const { user: userData, token } = response.data;
-      const profile: UserProfile = {
-        id: userData.id,
-        email: userData.email,
-        name: userData.name,
-        role: userData.role,
-      };
-
-      persistUser(profile, token);
-    } catch (error: unknown) {
-      if (error instanceof Error) {
-        throw new Error(error.message || "Invalid email or password");
-      }
-      throw new Error("Invalid email or password");
+    const response = await apiClient.login(email, password);
+    if (!response.success || !response.data) {
+      throw new Error(response.message || "Login failed");
     }
+    // Store token first so fetchProfile's apiClient picks it up
+    localStorage.setItem("access_token", response.data.token);
+    const profile = await fetchProfile();
+    persistUser(profile, response.data.token);
   };
 
   const signup = async (email: string, password: string, name: string) => {
-    try {
-      const response = await apiClient.register(email, password, name);
-
-      if (!response.success || !response.data) {
-        throw new Error(response.message || "Registration failed");
-      }
-
-      const { user: userData, token } = response.data;
-      const profile: UserProfile = {
-        id: userData.id,
-        email: userData.email,
-        name: userData.name,
-        role: userData.role || "employee",
-      };
-
-      persistUser(profile, token);
-    } catch (error: unknown) {
-      if (error instanceof Error) {
-        throw new Error(error.message || "Registration failed");
-      }
-      throw new Error("Registration failed");
+    const response = await apiClient.register(email, password, name);
+    if (!response.success || !response.data) {
+      throw new Error(response.message || "Registration failed");
     }
+    // Same pattern as login — store token, then fetch full profile
+    localStorage.setItem("access_token", response.data.token);
+    const profile = await fetchProfile();
+    persistUser(profile, response.data.token);
   };
 
-  const loginWithGoogle = async () => {
-    throw new Error("Google login not yet implemented");
+  const updateUser = (partial: Partial<UserProfile>) => {
+    setUser((prev) => {
+      if (!prev) return prev;
+      const updated = { ...prev, ...partial };
+      localStorage.setItem("cubit-auth-user", JSON.stringify(updated));
+      return updated;
+    });
   };
 
   const logout = () => {
@@ -130,8 +118,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem("cubit-role");
   };
 
-  const forgotPassword = async (email: string) => {
-    // TODO: Implement forgot password endpoint in backend
+  const hasPermission = (perm: string): boolean =>
+    user?.permissions?.includes(perm) ?? false;
+
+  const loginWithGoogle = async () => {
+    throw new Error("Google login not yet implemented");
+  };
+
+  const forgotPassword = async (_email: string) => {
     throw new Error("Forgot password not yet implemented");
   };
 
@@ -139,6 +133,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     <AuthContext.Provider
       value={{
         user,
+        updateUser,
         isAuthenticated: !!user,
         isLoading,
         login,
@@ -146,6 +141,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         loginWithGoogle,
         logout,
         forgotPassword,
+        hasPermission,
       }}
     >
       {children}

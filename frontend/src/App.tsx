@@ -1,12 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { createBrowserRouter, RouterProvider, Outlet } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/layout/ThemeProvider";
 import { RoleProvider } from "@/contexts/RoleContext";
 import { AuthProvider } from "@/contexts/AuthContext";
-import { ProtectedRoute } from "@/components/common/ProtectedRoute";
+import { ProtectedRoute } from "../src/components/common/ProtectedRoute";
 import { AppLayout } from "@/components/layout/AppLayout";
 import Dashboard from "./pages/Dashboard";
 import EmployeeList from "./pages/EmployeeList";
@@ -23,55 +23,154 @@ import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import ForgotPassword from "./pages/ForgotPassword";
 import NotFound from "./pages/NotFound";
+import {
+  DashboardAction,
+  EmployeesAction,
+  AttendanceAction,
+  LeaveManagementAction,
+  PayrollAction,
+  AssetsAction,
+  OffboardingAction,
+  ReportsAction,
+  RolesandAccessAction,
+  EmployeeSelfServiceAction,
+} from "@/permissions/permission";
 
 const queryClient = new QueryClient();
 
-const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <ThemeProvider>
-      <AuthProvider>
-        <RoleProvider>
-          <TooltipProvider>
-            <Toaster />
-            <Sonner />
-            <BrowserRouter>
-              <Routes>
-                {/* Public routes */}
-                <Route path="/login" element={<Login />} />
-                <Route path="/signup" element={<Signup />} />
-                <Route path="/forgot-password" element={<ForgotPassword />} />
+const App = () => {
+  const protectedLayout = (
+    <ProtectedRoute>
+      <AppLayout>
+        <Outlet />
+      </AppLayout>
+    </ProtectedRoute>
+  );
 
-                {/* Protected routes */}
-                <Route
-                  path="/*"
-                  element={
-                    <ProtectedRoute>
-                      <AppLayout>
-                        <Routes>
-                          <Route path="/" element={<Dashboard />} />
-                          <Route path="/employees" element={<EmployeeList />} />
-                          <Route path="/employees/:id" element={<EmployeeProfile />} />
-                          <Route path="/attendance" element={<Attendance />} />
-                          <Route path="/leave" element={<LeaveManagement />} />
-                          <Route path="/payroll" element={<Payroll />} />
-                          <Route path="/ess" element={<EmployeeSelfService />} />
-                          <Route path="/offboarding" element={<Offboarding />} />
-                          <Route path="/reports" element={<Reports />} />
-                          <Route path="/roles" element={<RolesAccess />} />
-                          <Route path="/assets" element={<AssetManagement />} />
-                          <Route path="*" element={<NotFound />} />
-                        </Routes>
-                      </AppLayout>
-                    </ProtectedRoute>
-                  }
-                />
-              </Routes>
-            </BrowserRouter>
-          </TooltipProvider>
-        </RoleProvider>
-      </AuthProvider>
-    </ThemeProvider>
-  </QueryClientProvider>
-);
+  const router = createBrowserRouter(
+    [
+      { path: "/login", element: <Login /> },
+      { path: "/signup", element: <Signup /> },
+      { path: "/forgot-password", element: <ForgotPassword /> },
+      {
+        path: "/",
+        element: protectedLayout,
+        children: [
+          {
+            index: true,
+            element: (
+              <ProtectedRoute action={DashboardAction.View}>
+                <Dashboard />
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: "employees",
+            element: (
+              <ProtectedRoute action={EmployeesAction.View}>
+                <EmployeeList />
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: "employees/:id",
+            element: (
+              <ProtectedRoute action={EmployeesAction.View}>
+                <EmployeeProfile />
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: "attendance",
+            element: (
+              <ProtectedRoute action={AttendanceAction.View}>
+                <Attendance />
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: "leave",
+            element: (
+              <ProtectedRoute action={LeaveManagementAction.View}>
+                <LeaveManagement />
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: "payroll",
+            element: (
+              <ProtectedRoute action={PayrollAction.View}>
+                <Payroll />
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: "ess",
+            element: (
+              <ProtectedRoute action={EmployeeSelfServiceAction.View}>
+                <EmployeeSelfService />
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: "offboarding",
+            element: (
+              <ProtectedRoute action={OffboardingAction.View}>
+                <Offboarding />
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: "reports",
+            element: (
+              <ProtectedRoute action={ReportsAction.View}>
+                <Reports />
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: "roles",
+            element: (
+              <ProtectedRoute action={RolesandAccessAction.View}>
+                <RolesAccess />
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: "assets",
+            element: (
+              <ProtectedRoute action={AssetsAction.View}>
+                <AssetManagement />
+              </ProtectedRoute>
+            ),
+          },
+          { path: "*", element: <NotFound /> },
+        ],
+      },
+    ],
+    {
+      future: {
+        v7_startTransition: true,
+        v7_relativeSplatPath: true,
+      },
+    },
+  );
+
+  return (
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider>
+        <AuthProvider>
+          <RoleProvider>
+            <TooltipProvider>
+              <Toaster />
+              <Sonner />
+              <RouterProvider router={router} />
+            </TooltipProvider>
+          </RoleProvider>
+        </AuthProvider>
+      </ThemeProvider>
+    </QueryClientProvider>
+  );
+};
 
 export default App;

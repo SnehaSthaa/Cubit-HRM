@@ -30,7 +30,7 @@ router.put(
 );
 router.delete(
   "/:id",
-  authorize("super_admin"),
+  authorize("super_admin", "hr_admin"),
   hasRequiredPermission([LeaveManagementAction.Delete]),
   LeavePolicyController.remove,
 );

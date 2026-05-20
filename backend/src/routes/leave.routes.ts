@@ -15,12 +15,14 @@ import {
 const router = Router();
 router.use(authenticate);
 
+// ─── Collection routes ────────────────────────────────────────────────────────
 router.get(
   "/",
   authorize("super_admin", "hr_admin", "employee"),
   hasRequiredPermission([LeaveManagementAction.View]),
   LeaveController.getAll,
 );
+
 router.post(
   "/",
   authorize("super_admin", "hr_admin", "employee"),
@@ -29,46 +31,54 @@ router.post(
   LeaveController.create,
 );
 
-// ✅ All static/specific routes BEFORE any /:id param routes
+// ─── /balance routes — most specific FIRST, param route LAST ─────────────────
+// IMPORTANT: /balance/customize must come before /balance/:employee_id,
+// otherwise Express treats the string "customize" as the :employee_id value
+// and this route is never reached.
+
+router.patch(
+  "/balance/customize",
+  authorize("super_admin", "hr_admin"),
+  LeaveController.updateLeaveBalance,
+);
+
 router.get(
   "/balance",
   authorize("super_admin", "hr_admin"),
   hasRequiredPermission([LeaveManagementAction.View]),
   LeaveController.getAllLeaveBalances,
 );
+
 router.get(
   "/balance/:employee_id",
   authorize("super_admin", "hr_admin", "employee"),
   hasRequiredPermission([LeaveManagementAction.View]),
   LeaveController.getLeaveBalance,
 );
-router.patch(
-  // ✅ PATCH, no /leaves/ prefix
-  "/balance/customize",
-  authorize("super_admin", "hr_admin"),
-  LeaveController.updateLeaveBalance,
-);
+
+// ─── /employee/:id route — before generic /:id routes ────────────────────────
 router.get(
-  // ✅ moved above /:id
   "/employee/:employeeId",
   authorize("super_admin", "hr_admin", "employee"),
   hasRequiredPermission([LeaveManagementAction.View]),
   LeaveController.getByEmployee,
 );
 
-// ✅ Param routes come last
+// ─── /:id action routes — approve/reject before generic /:id ─────────────────
 router.put(
   "/:id/approve",
   authorize("hr_admin", "super_admin"),
   hasRequiredPermission([LeaveManagementAction.Edit]),
   LeaveController.approve,
 );
+
 router.put(
   "/:id/reject",
   authorize("hr_admin", "super_admin"),
   hasRequiredPermission([LeaveManagementAction.Edit]),
   LeaveController.reject,
 );
+
 router.put(
   "/:id",
   authorize("super_admin", "hr_admin", "employee"),
@@ -76,6 +86,7 @@ router.put(
   validate(updateLeaveSchema),
   LeaveController.updateLeave,
 );
+
 router.delete(
   "/:id",
   authorize("super_admin", "hr_admin", "employee"),

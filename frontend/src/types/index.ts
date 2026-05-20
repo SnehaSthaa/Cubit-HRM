@@ -58,6 +58,8 @@ export interface Employee {
     role: string;
     is_active: boolean;
   };
+  updated_at?: string; // ← add this
+  created_at?: string;
 }
 // ──── Documents ────
 export type DocStatus = "Verified" | "Pending" | "Rejected";

@@ -1,6 +1,30 @@
 import { Request, Response } from "express";
 import { prisma } from "../db/prisma.js";
 import { ApiResponse } from "../types/index.js";
+function calcProRataTotal(
+  joiningDate: Date,
+  annualQuota: number,
+  forYear: number,
+): number {
+  const now = new Date();
+
+  const accrualStart = new Date(
+    joiningDate.getFullYear(),
+    joiningDate.getMonth() + 1,
+    1,
+  );
+
+  const yearStart = new Date(forYear, 0, 1);
+  const effectiveStart = accrualStart > yearStart ? accrualStart : yearStart;
+
+  if (effectiveStart > now) return 0;
+
+  const yearsD = now.getFullYear() - effectiveStart.getFullYear();
+  const monthsD = now.getMonth() - effectiveStart.getMonth();
+  const monthsAccrued = Math.max(0, yearsD * 12 + monthsD + 1);
+
+  return Math.min(monthsAccrued, annualQuota);
+}
 
 export class LeaveController {
   // =========================
@@ -29,10 +53,7 @@ export class LeaveController {
         data: leaves,
       });
     } catch (error: any) {
-      return res.status(500).json({
-        success: false,
-        message: error.message,
-      });
+      return res.status(500).json({ success: false, message: error.message });
     }
   }
 
@@ -45,27 +66,22 @@ export class LeaveController {
         req.body;
 
       if (!employee_id || !start_date || !end_date || !leave_type_id) {
-        return res.status(400).json({
-          success: false,
-          message: "Missing required fields",
-        });
+        return res
+          .status(400)
+          .json({ success: false, message: "Missing required fields" });
       }
 
-      // Validate leave policy
       const policy = await prisma.leavePolicy.findUnique({
         where: { id: leave_type_id },
       });
-
       if (!policy || !policy.active) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid leave type",
-        });
+        return res
+          .status(400)
+          .json({ success: false, message: "Invalid leave type" });
       }
 
       const startDate = new Date(start_date);
       const endDate = new Date(end_date);
-
       if (endDate < startDate) {
         return res.status(400).json({
           success: false,
@@ -78,20 +94,13 @@ export class LeaveController {
           (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24),
         ) + 1;
 
-      // Overlap check
       const overlap = await prisma.leave.findFirst({
         where: {
           employee_id,
           status: { not: "rejected" },
-          OR: [
-            {
-              start_date: { lte: endDate },
-              end_date: { gte: startDate },
-            },
-          ],
+          OR: [{ start_date: { lte: endDate }, end_date: { gte: startDate } }],
         },
       });
-
       if (overlap) {
         return res.status(400).json({
           success: false,
@@ -115,16 +124,11 @@ export class LeaveController {
         },
       });
 
-      return res.status(201).json({
-        success: true,
-        message: "Leave request created",
-        data: leave,
-      });
+      return res
+        .status(201)
+        .json({ success: true, message: "Leave request created", data: leave });
     } catch (error: any) {
-      return res.status(500).json({
-        success: false,
-        message: error.message,
-      });
+      return res.status(500).json({ success: false, message: error.message });
     }
   }
 
@@ -138,17 +142,13 @@ export class LeaveController {
       const user = req.user as any;
 
       if (!user?.userId) {
-        return res.status(401).json({
-          success: false,
-          message: "Unauthorized user",
-        });
+        return res
+          .status(401)
+          .json({ success: false, message: "Unauthorized user" });
       }
 
       const result = await prisma.$transaction(async (tx) => {
-        const leave = await tx.leave.findUnique({
-          where: { id },
-        });
-
+        const leave = await tx.leave.findUnique({ where: { id } });
         if (!leave) throw new Error("Leave not found");
         if (leave.status === "approved") throw new Error("Already approved");
         if (leave.status === "rejected")
@@ -157,12 +157,10 @@ export class LeaveController {
         const policy = await tx.leavePolicy.findUnique({
           where: { id: leave.leave_type_id },
         });
-
         if (!policy) throw new Error("Leave policy not found");
 
         const year = new Date(leave.start_date).getFullYear();
 
-        // ✅ FIX 1: ensure balance exists
         let balance = await tx.leaveBalance.findUnique({
           where: {
             employee_id_year_leave_type_id: {
@@ -174,22 +172,32 @@ export class LeaveController {
         });
 
         if (!balance) {
+          const employee = await tx.employee.findUnique({
+            where: { id: leave.employee_id },
+          });
+          if (!employee) throw new Error("Employee not found");
+
+          // ── Pro-rata: 1 day per month, starting the month AFTER joining ──
+          const total = policy.pro_rata
+            ? calcProRataTotal(
+                new Date(employee.joining_date),
+                policy.annual_quota,
+                year,
+              )
+            : policy.annual_quota;
+
           balance = await tx.leaveBalance.create({
             data: {
               employee_id: leave.employee_id,
               year,
               leave_type_id: leave.leave_type_id,
-              total: policy.annual_quota,
+              total,
               used: 0,
-              remaining: policy.annual_quota,
             },
           });
         }
 
-        // normalize remaining
         const remaining = balance.total - balance.used;
-
-        // ❗ FIX 2: proper validation
         if (leave.days_count > remaining) {
           throw new Error(
             `Insufficient leave balance. Remaining: ${remaining}, Requested: ${leave.days_count}`,
@@ -205,7 +213,6 @@ export class LeaveController {
           },
         });
 
-        // FIX 3: safe update
         await tx.leaveBalance.update({
           where: {
             employee_id_year_leave_type_id: {
@@ -216,7 +223,6 @@ export class LeaveController {
           },
           data: {
             used: { increment: leave.days_count },
-            remaining: { decrement: leave.days_count },
           },
         });
 
@@ -230,7 +236,6 @@ export class LeaveController {
       });
     } catch (error: any) {
       console.error("APPROVE ERROR:", error);
-
       return res.status(400).json({
         success: false,
         message: error.message || "Failed to approve leave",
@@ -239,7 +244,7 @@ export class LeaveController {
   }
 
   // =========================
-  // REJECT LEAVE (FIXED 500 ISSUE)
+  // REJECT LEAVE
   // =========================
   static async reject(req: Request, res: Response<ApiResponse>) {
     try {
@@ -248,23 +253,17 @@ export class LeaveController {
       const user = req.user as any;
 
       if (!user?.userId) {
-        return res.status(401).json({
-          success: false,
-          message: "Unauthorized user",
-        });
+        return res
+          .status(401)
+          .json({ success: false, message: "Unauthorized user" });
       }
 
-      const existing = await prisma.leave.findUnique({
-        where: { id },
-      });
-
+      const existing = await prisma.leave.findUnique({ where: { id } });
       if (!existing) {
-        return res.status(404).json({
-          success: false,
-          message: "Leave not found",
-        });
+        return res
+          .status(404)
+          .json({ success: false, message: "Leave not found" });
       }
-
       if (existing.status !== "pending") {
         return res.status(400).json({
           success: false,
@@ -288,7 +287,6 @@ export class LeaveController {
       });
     } catch (error: any) {
       console.error("REJECT ERROR:", error);
-
       return res.status(500).json({
         success: false,
         message: error.message || "Internal server error",
@@ -303,20 +301,15 @@ export class LeaveController {
     try {
       const { id } = req.params;
 
-      const leave = await prisma.leave.findUnique({
-        where: { id },
-      });
-
+      const leave = await prisma.leave.findUnique({ where: { id } });
       if (!leave) {
-        return res.status(404).json({
-          success: false,
-          message: "Leave not found",
-        });
+        return res
+          .status(404)
+          .json({ success: false, message: "Leave not found" });
       }
 
       if (leave.status === "approved") {
         const year = new Date(leave.start_date).getFullYear();
-
         const balance = await prisma.leaveBalance.findUnique({
           where: {
             employee_id_year_leave_type_id: {
@@ -329,33 +322,22 @@ export class LeaveController {
 
         if (balance) {
           const newUsed = Math.max(0, balance.used - leave.days_count);
-
           await prisma.leaveBalance.update({
             where: { id: balance.id },
-            data: {
-              used: newUsed,
-              remaining: balance.total - newUsed,
-            },
+            data: { used: newUsed },
           });
         }
       }
 
       await prisma.leave.delete({ where: { id } });
-
-      return res.json({
-        success: true,
-        message: "Leave deleted successfully",
-      });
+      return res.json({ success: true, message: "Leave deleted successfully" });
     } catch (error: any) {
-      return res.status(500).json({
-        success: false,
-        message: error.message,
-      });
+      return res.status(500).json({ success: false, message: error.message });
     }
   }
 
   // =========================
-  // GET LEAVE BALANCE
+  // GET LEAVE BALANCE (single employee)
   // =========================
   static async getLeaveBalance(req: Request, res: Response<ApiResponse>) {
     try {
@@ -373,24 +355,53 @@ export class LeaveController {
 
       const year = new Date().getFullYear();
 
+      const employee = await prisma.employee.findUnique({
+        where: { id: employeeId },
+        select: { id: true, joining_date: true },
+      });
+
+      if (!employee) {
+        return res.status(404).json({
+          success: false,
+          message: "Employee not found",
+        });
+      }
+
       const policies = await prisma.leavePolicy.findMany({
         where: { active: true },
       });
 
       const balances = await prisma.leaveBalance.findMany({
         where: { employee_id: employeeId, year },
-        include: {
-          leavePolicy: true,
-        },
       });
+
       const result = policies.map((policy) => {
         const balance = balances.find((b) => b.leave_type_id === policy.id);
+        const used = Number(balance?.used ?? 0);
+
+        let accrued: number;
+        if (balance) {
+          accrued = Number(balance.total);
+        } else if (policy.pro_rata) {
+          accrued = calcProRataTotal(
+            new Date(employee.joining_date),
+            policy.annual_quota,
+            year,
+          );
+        } else {
+          accrued = policy.annual_quota;
+        }
+
+        const total = accrued;
 
         return {
           leave_type: policy.name,
-          total: balance?.total ?? policy.annual_quota,
-          used: balance?.used ?? 0,
-          remaining: balance?.remaining ?? policy.annual_quota,
+          leave_type_id: policy.id,
+          accrued,
+          total,
+          used,
+          remaining: accrued - used,
+          is_pro_rata: policy.pro_rata,
         };
       });
 
@@ -400,107 +411,168 @@ export class LeaveController {
         data: result,
       });
     } catch (error: any) {
-      return res.status(500).json({
-        success: false,
-        message: error.message,
-      });
+      return res.status(500).json({ success: false, message: error.message });
     }
   }
 
   // =========================
-  // GET ALL BALANCES
+  // GET ALL BALANCES (HR view)
   // =========================
-  static async getAllLeaveBalances(req: Request, res: Response) {
+
+  static async getAllLeaveBalances(req: Request, res: Response<ApiResponse>) {
     try {
-      const balances = await prisma.leaveBalance.findMany({
-        include: {
-          employee: {
-            select: {
-              id: true,
-              first_name: true,
-              last_name: true,
-              department: true,
-            },
-          },
-          leavePolicy: true,
-        },
+      const year = new Date().getFullYear();
+
+      const employees = await prisma.employee.findMany();
+
+      const policies = await prisma.leavePolicy.findMany({
+        where: { active: true },
       });
+
+      const balances = await prisma.leaveBalance.findMany({
+        where: { year },
+      });
+
+      const result = employees.flatMap((employee) =>
+        policies.map((policy) => {
+          const balance = balances.find(
+            (b) =>
+              b.employee_id === employee.id && b.leave_type_id === policy.id,
+          );
+
+          const used = Number(balance?.used ?? 0);
+
+          let total: number;
+
+          if (balance) {
+            total = Number(balance.total);
+          } else if (policy.pro_rata) {
+            total = calcProRataTotal(
+              new Date(employee.joining_date),
+              policy.annual_quota,
+              year,
+            );
+          } else {
+            total = policy.annual_quota;
+          }
+
+          return {
+            employee_id: employee.id,
+            employee: {
+              id: employee.id,
+              first_name: employee.first_name,
+              last_name: employee.last_name,
+              department: employee.department,
+            },
+            leave_type: policy.name,
+            leave_type_id: policy.id,
+            total,
+            used,
+            remaining: total - used,
+          };
+        }),
+      );
 
       return res.json({
         success: true,
-        data: balances,
+        message: "All leave balances fetched",
+        data: result,
       });
-    } catch {
+    } catch (error: any) {
       return res.status(500).json({
         success: false,
         message: "Failed to fetch leave balances",
       });
     }
   }
-  //UPDATE LEAVE BALANCES
-  static async updateLeaveBalance(req: Request, res: Response) {
+
+  // =========================
+  // UPDATE LEAVE BALANCE (customize quota)
+  // =========================
+  static async updateLeaveBalance(req: Request, res: Response<ApiResponse>) {
     try {
       const { employee_id, leave_type_id, total, reason } = req.body;
-      if (!employee_id || !leave_type_id || total == null)
+
+      if (!employee_id || !leave_type_id || total == null) {
         return res.status(400).json({
           success: false,
           message: "employee_id, leave_type_id, and total are required",
         });
-      if (total < 0) {
+      }
+
+      // ── Allow negative totals: only reject non-numeric values ──
+      const totalNum = Number(total);
+      if (isNaN(totalNum)) {
         return res.status(400).json({
           success: false,
-          message: "Total cannot be negative",
+          message: "total must be a valid number",
         });
       }
-      const year = new Date().getFullYear();
-      const existing = await prisma.leaveBalance.findUnique({
-        where: {
-          employee_id_year_leave_type_id: {
-            employee_id,
-            year,
-            leave_type_id,
-          },
-        },
+
+      const policy = await prisma.leavePolicy.findUnique({
+        where: { id: leave_type_id },
       });
-      const used = existing?.used ?? 0;
+      if (!policy) {
+        return res
+          .status(404)
+          .json({ success: false, message: "Leave policy not found" });
+      }
+
+      const employee = await prisma.employee.findUnique({
+        where: { id: employee_id },
+      });
+      if (!employee) {
+        return res
+          .status(404)
+          .json({ success: false, message: "Employee not found" });
+      }
+
+      const year = new Date().getFullYear();
 
       const balance = await prisma.leaveBalance.upsert({
         where: {
-          employee_id_year_leave_type_id: {
-            employee_id,
-            year,
-            leave_type_id,
-          },
+          employee_id_year_leave_type_id: { employee_id, year, leave_type_id },
         },
-        update: {
-          total,
-          remaining: total - used,
-        },
+        update: { total: totalNum },
         create: {
           employee_id,
           year,
           leave_type_id,
-          total,
+          total: totalNum,
           used: 0,
-          remaining: total,
         },
       });
+
+      const used = Number(balance.used ?? 0);
+      const newTotal = Number(balance.total ?? 0);
 
       return res.json({
         success: true,
         message: "Leave balance updated",
-        data: balance,
+        data: {
+          id: balance.id,
+          employee_id: balance.employee_id,
+          employee: {
+            id: employee.id,
+            first_name: employee.first_name,
+            last_name: employee.last_name,
+            department: employee.department,
+          },
+          leave_type: policy.name,
+          leave_type_id: balance.leave_type_id,
+          total: newTotal,
+          used,
+          remaining: newTotal - used,
+        },
       });
     } catch (error: any) {
-      return res.status(500).json({
-        success: false,
-        message: error.message,
-      });
+      return res.status(500).json({ success: false, message: error.message });
     }
   }
 
+  // =========================
   // GET LEAVES BY EMPLOYEE ID
-
+  // =========================
   static async getByEmployee(req: Request, res: Response<ApiResponse>) {
     try {
       const { employeeId } = req.params;
@@ -510,7 +582,6 @@ export class LeaveController {
         const employee = await prisma.employee.findUnique({
           where: { user_id: requestingUser.userId },
         });
-
         if (!employee || employee.id !== employeeId) {
           return res.status(403).json({
             success: false,
@@ -534,10 +605,7 @@ export class LeaveController {
         data: leaves,
       });
     } catch (error: any) {
-      return res.status(500).json({
-        success: false,
-        message: error.message,
-      });
+      return res.status(500).json({ success: false, message: error.message });
     }
   }
 
@@ -549,17 +617,12 @@ export class LeaveController {
       const { id } = req.params;
       const { start_date, end_date, leave_type_id, reason } = req.body;
 
-      const leave = await prisma.leave.findUnique({
-        where: { id },
-      });
-
+      const leave = await prisma.leave.findUnique({ where: { id } });
       if (!leave) {
-        return res.status(404).json({
-          success: false,
-          message: "Leave not found",
-        });
+        return res
+          .status(404)
+          .json({ success: false, message: "Leave not found" });
       }
-
       if (leave.status !== "pending") {
         return res.status(400).json({
           success: false,
@@ -569,24 +632,20 @@ export class LeaveController {
 
       const start = new Date(start_date);
       const end = new Date(end_date);
-
       if (end < start) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid date range",
-        });
+        return res
+          .status(400)
+          .json({ success: false, message: "Invalid date range" });
       }
 
       if (leave_type_id) {
         const policy = await prisma.leavePolicy.findUnique({
           where: { id: leave_type_id },
         });
-
         if (!policy) {
-          return res.status(400).json({
-            success: false,
-            message: "Invalid leave type",
-          });
+          return res
+            .status(400)
+            .json({ success: false, message: "Invalid leave type" });
         }
       }
 
@@ -611,10 +670,7 @@ export class LeaveController {
         data: updated,
       });
     } catch (error: any) {
-      return res.status(500).json({
-        success: false,
-        message: error.message,
-      });
+      return res.status(500).json({ success: false, message: error.message });
     }
   }
 }

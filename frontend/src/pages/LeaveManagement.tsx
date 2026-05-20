@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { motion } from "framer-motion";
 import {
   CalendarDays,
@@ -10,6 +10,10 @@ import {
   Trash2,
   Settings2,
   Calendar,
+  Briefcase,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,33 +36,34 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
 import { useRole } from "@/contexts/RoleContext";
 import { useToast } from "@/hooks/use-toast";
-import { Employee } from "@/types";
+import { Employee, LeaveBalance } from "@/types";
 import { apiClient, LeavePolicyApi } from "@/services/apiClient";
+import { leaveTypeIcons } from "./EmployeeProfile";
 
 const item = { hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0 } };
 const container = {
   hidden: { opacity: 0 },
   show: { opacity: 1, transition: { staggerChildren: 0.05 } },
 };
+
 interface LeaveBalanceApi {
   id: string;
   employee_id: string;
   leave_type_id: string;
+  leave_type: string;
   total: number;
   used: number;
   remaining: number;
-  year: number;
-  employee: {
+  year?: number;
+  accrued?: number;
+  employee?: {
     id: string;
     first_name: string;
     last_name: string;
     department: string;
   };
-  leavePolicy: {
-    id: string;
-    name: string;
-  };
 }
+
 export interface LeaveRequest {
   id: string;
   employee: string;
@@ -156,6 +161,20 @@ const statusClass: Record<string, string> = {
   Rejected: "status-resigned",
 };
 
+const isValidLeaveType = (t: string): t is LeavePolicy["type"] =>
+  ["paid", "sick", "unpaid", "compensatory", "custom"].includes(t);
+
+const mapPolicy = (p: LeavePolicyApi): LeavePolicy => ({
+  id: p.id,
+  name: p.name,
+  type: isValidLeaveType(p.type) ? p.type : "custom",
+  annualQuota: p.annual_quota,
+  proRata: p.pro_rata,
+  carryForward: p.carry_forward,
+  maxCarryForward: p.max_carry_forward,
+  active: p.active,
+});
+
 export default function LeaveManagement() {
   const { isHR } = useRole();
   const { toast } = useToast();
@@ -181,6 +200,7 @@ export default function LeaveManagement() {
   const [selectedRequest, setSelectedRequest] = useState<LeaveRequest | null>(
     null,
   );
+  const [leaveBalance, setLeaveBalance] = useState<LeaveBalance[]>([]);
   const [rejectDialog, setRejectDialog] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
   const [editDialog, setEditDialog] = useState(false);
@@ -194,23 +214,29 @@ export default function LeaveManagement() {
     end_date: "",
     holiday_type: "public" as Holiday["holiday_type"],
   });
+  const [sortEmployeeName, setSortEmployeeName] = useState<
+    "asc" | "desc" | null
+  >(null);
 
   const [overrides, setOverrides] = useState<LeaveOverride[]>([]);
   const [overrideDialog, setOverrideDialog] = useState(false);
   const [overrideSort, setOverrideSort] = useState<{
     key: string;
     dir: "asc" | "desc";
-  }>({ key: "employeeName", dir: "asc" });
+  }>({
+    key: "employeeName",
+    dir: "asc",
+  });
   const [newOverride, setNewOverride] = useState({
     employeeId: "",
     leaveType: "",
     customQuota: 0,
     reason: "",
   });
-  const [editOverride, setEditOverride] = useState<LeaveOverride | null>(null);
-  //Leave Balance
-  const [allBalances, setAllBAlances] = useState<LeaveBalanceApi[]>([]);
+
+  const [allBalances, setAllBalances] = useState<LeaveBalanceApi[]>([]);
   const [balancesLoading, setBalancesLoading] = useState(false);
+
   const [policyDialog, setPolicyDialog] = useState(false);
   const [editPolicy, setEditPolicy] = useState<LeavePolicy | null>(null);
   const [newPolicy, setNewPolicy] = useState({
@@ -229,35 +255,38 @@ export default function LeaveManagement() {
     to: "",
     reason: "",
   });
+  const [debugJoinDate, setDebugJoinDate] = useState("");
+  const [debugQuota, setDebugQuota] = useState(12);
+  const [debugResult, setDebugResult] = useState<
+    { month: string; accrued: number }[] | null
+  >(null);
+  const [debugLoading, setDebugLoading] = useState(false);
+  const [debugNextYear, setDebugNextYear] = useState<{
+    month: string;
+    accrued: number;
+  } | null>(null);
   const [applyForEmployee, setApplyForEmployee] = useState(false);
 
   const leaveTypes = policies.filter((p) => p.active).map((p) => p.name);
 
-  const isValidLeaveType = (t: string): t is LeavePolicy["type"] =>
-    ["paid", "sick", "unpaid", "compensatory", "custom"].includes(t);
-
-  const mapPolicy = (p: LeavePolicyApi): LeavePolicy => ({
-    id: p.id,
-    name: p.name,
-    type: isValidLeaveType(p.type) ? p.type : "custom",
-    annualQuota: p.annual_quota,
-    proRata: p.pro_rata,
-    carryForward: p.carry_forward,
-    maxCarryForward: p.max_carry_forward,
-    active: p.active,
-  });
-
-  const fetchEmployees = async () => {
+  const fetchEmployees = useCallback(async () => {
     if (!isHR) return;
     try {
       const res = await apiClient.getEmployees();
-      setEmployees(Array.isArray(res.data) ? res.data : []);
+      const list = Array.isArray(res.data)
+        ? res.data.filter(
+            (emp) =>
+              emp.employment_status === "active" ||
+              emp.employment_status === "notice_period",
+          )
+        : [];
+      setEmployees(list);
     } catch (err) {
       console.error("Failed to fetch employees", err);
     }
-  };
+  }, [isHR]);
 
-  const fetchLeaves = async () => {
+  const fetchLeaves = useCallback(async () => {
     try {
       let data: LeaveApiResponse[] = [];
       if (isHR) {
@@ -293,25 +322,50 @@ export default function LeaveManagement() {
           approvedBy: l.approved_by ?? l.approvedBy,
           remarks: l.remarks,
           rejectionReason:
-            l.rejection_reason ?? l.approval_notes ?? l.rejectionReason,
+            l.status?.toLocaleLowerCase() === "rejected"
+              ? (l.rejection_reason ?? l.approval_notes ?? l.rejectionReason)
+              : "",
         };
       });
       setRequests(mapped);
     } catch (err) {
       console.error("Failed to fetch leaves", err);
     }
-  };
+  }, [isHR, currentEmployeeId]);
 
-  const fetchPolicies = async () => {
+  const fetchPolicies = useCallback(async () => {
     try {
       const res = await apiClient.getPolicies();
       setPolicies((Array.isArray(res.data) ? res.data : []).map(mapPolicy));
     } catch (err) {
       console.error("Failed to fetch policies", err);
     }
-  };
+  }, []);
 
-  const fetchHolidays = async () => {
+  const fetchLeaveBalance = useCallback(async () => {
+    try {
+      if (!currentEmployeeId) return;
+      const res = await apiClient.getLeaveBalance(currentEmployeeId);
+      if (res?.data) {
+        setLeaveBalance(
+          res.data.map((l: LeaveBalanceApi) => ({
+            leave_type: l.leave_type,
+            total: l.total ?? l.accrued ?? 0,
+            used: l.used ?? 0,
+            remaining: l.remaining ?? 0,
+          })),
+        );
+      }
+    } catch (err) {
+      toast({ title: "Failed to fetch leave balance", variant: "destructive" });
+    }
+  }, [currentEmployeeId, toast]);
+
+  useEffect(() => {
+    fetchLeaveBalance();
+  }, [fetchLeaveBalance]);
+
+  const fetchHolidays = useCallback(async () => {
     try {
       const res = await apiClient.getHolidays();
       const data = Array.isArray(res.data) ? res.data : [];
@@ -327,37 +381,125 @@ export default function LeaveManagement() {
     } catch (err) {
       console.error("Failed to fetch holidays", err);
     }
-  };
-  //Fetch LeaveBalances
-  const fetchAllBalances = async () => {
+  }, []);
+
+  const fetchAllBalances = useCallback(async () => {
     if (!isHR) return;
     setBalancesLoading(true);
     try {
       const res = await apiClient.getAllLeaveBalances();
-      setAllBAlances(
+      setAllBalances(
         Array.isArray(res.data)
           ? (res.data as unknown as LeaveBalanceApi[])
           : [],
       );
     } catch (err) {
-      console.log("Failed to fetch leave balances", err);
+      console.error("Failed to fetch leave balances", err);
     } finally {
       setBalancesLoading(false);
     }
-  };
+  }, [isHR]);
 
   useEffect(() => {
     fetchEmployees();
     fetchPolicies();
     fetchHolidays();
     fetchAllBalances();
-  }, [isHR]);
+  }, [fetchEmployees, fetchPolicies, fetchHolidays, fetchAllBalances]);
 
   useEffect(() => {
     if (isHR || currentEmployeeId) {
       fetchLeaves();
     }
-  }, [isHR, currentEmployeeId]);
+  }, [isHR, currentEmployeeId, fetchLeaves]);
+
+  useEffect(() => {
+    if (!newOverride.employeeId || !newOverride.leaveType) return;
+    const policy = policies.find((p) => p.name === newOverride.leaveType);
+    if (!policy) return;
+    const existing = allBalances.find(
+      (b) =>
+        b.employee_id === newOverride.employeeId &&
+        b.leave_type_id === policy.id,
+    );
+    setNewOverride((prev) => ({
+      ...prev,
+      customQuota: existing?.total ?? policy.annualQuota,
+    }));
+  }, [newOverride.employeeId, newOverride.leaveType, policies, allBalances]);
+
+  const activePolicies = useMemo(
+    () => policies.filter((p) => p.active),
+    [policies],
+  );
+
+  const employeeBalances = useMemo(() => {
+    return employees.map((emp) => {
+      const types = activePolicies.map((policy) => {
+        const balance = allBalances.find(
+          (b) => b.employee_id === emp.id && b.leave_type_id === policy.id,
+        );
+
+        let total: number;
+        if (balance) {
+          total = balance.total;
+        } else if (policy.proRata) {
+          total = 0;
+        } else {
+          total = policy.annualQuota;
+        }
+
+        const used = balance?.used ?? 0;
+        const remaining = total - used;
+
+        return {
+          type: policy.name,
+          policyId: policy.id,
+          isProRata: policy.proRata,
+          total,
+          used,
+          remaining,
+          hasDbRow: !!balance,
+        };
+      });
+      return { employee: emp, types };
+    });
+  }, [employees, activePolicies, allBalances]);
+
+  const sortedEmployeeBalances = useMemo(() => {
+    return [...employeeBalances].sort((a, b) => {
+      if (!sortEmployeeName) return 0;
+      const nameA =
+        `${a.employee.first_name} ${a.employee.last_name}`.toLowerCase();
+      const nameB =
+        `${b.employee.first_name} ${b.employee.last_name}`.toLowerCase();
+      return sortEmployeeName === "asc"
+        ? nameA.localeCompare(nameB)
+        : nameB.localeCompare(nameA);
+    });
+  }, [employeeBalances, sortEmployeeName]);
+  const eligibleEmployeeIds = new Set(
+    employees
+      .filter(
+        (e) =>
+          e.employment_status === "active" ||
+          e.employment_status === "notice_period",
+      )
+      .map((e) => e.id),
+  );
+
+  // Rows where the stored total differs from the policy default
+  const customizedBalances = allBalances.filter((b) => {
+    const policy = policies.find((p) => p.id === b.leave_type_id);
+
+    return (
+      policy &&
+      eligibleEmployeeIds.has(b.employee_id) &&
+      b.total !== policy.annualQuota
+    );
+  });
+
+  // ─── Handlers ─────────────────────────────────────────────────────────────
 
   const handleApplyLeave = async () => {
     if (!newLeave.type) {
@@ -593,6 +735,16 @@ export default function LeaveManagement() {
     }
   };
 
+  const calculateDays = (start: string, end: string) => {
+    const startDate = new Date(start);
+    const endDate = new Date(end);
+    return (
+      Math.ceil(
+        (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24),
+      ) + 1
+    );
+  };
+
   const handleCreatePolicy = async () => {
     if (!newPolicy.name.trim()) {
       toast({ title: "Policy name is required", variant: "destructive" });
@@ -665,9 +817,13 @@ export default function LeaveManagement() {
     try {
       await apiClient.deletePolicy(id);
       await fetchPolicies();
-      toast({ title: "Policy deleted" });
-    } catch {
-      toast({ title: "Error deleting policy" });
+      toast({ title: "Policy deleted successfully" });
+    } catch (error) {
+      toast({
+        title: "Cannot delete policy",
+        description: error.message,
+        variant: "destructive",
+      });
     }
   };
 
@@ -678,10 +834,6 @@ export default function LeaveManagement() {
     }
     if (!newOverride.leaveType) {
       toast({ title: "Please select a leave type", variant: "destructive" });
-      return;
-    }
-    if (newOverride.customQuota < 0) {
-      toast({ title: "Quota cannot be negative", variant: "destructive" });
       return;
     }
     if (!newOverride.reason.trim()) {
@@ -696,13 +848,14 @@ export default function LeaveManagement() {
     }
 
     try {
+      // Backend accepts any numeric total including negative values
       await apiClient.updateLeaveBalance({
         employee_id: newOverride.employeeId,
         leave_type_id: policy.id,
         total: newOverride.customQuota,
         reason: newOverride.reason,
       });
-      await fetchAllBalances();
+
       setOverrideDialog(false);
       setNewOverride({
         employeeId: "",
@@ -710,38 +863,12 @@ export default function LeaveManagement() {
         customQuota: 0,
         reason: "",
       });
-      toast({ title: "Leave quota customized" });
+      await fetchAllBalances();
+      toast({ title: "Leave quota updated successfully" });
     } catch (err) {
       console.error("Failed to customize leave", err);
       toast({ title: "Error", description: "Failed to update leave quota." });
     }
-  };
-  // Add this effect inside the component, near the other state
-  useEffect(() => {
-    if (!newOverride.employeeId || !newOverride.leaveType) return;
-    const policy = policies.find((p) => p.name === newOverride.leaveType);
-    if (!policy) return;
-    const existing = allBalances.find(
-      (b) =>
-        b.employee_id === newOverride.employeeId &&
-        b.leave_type_id === policy.id,
-    );
-    setNewOverride((prev) => ({
-      ...prev,
-      customQuota: existing?.total ?? policy.annualQuota,
-    }));
-  }, [newOverride.employeeId, newOverride.leaveType]);
-
-  const handleDeleteOverride = (id: string) => {
-    setOverrides((prev) => prev.filter((o) => o.id !== id));
-    toast({ title: "Custom leave removed" });
-  };
-
-  const sortOverride = (key: string) => {
-    setOverrideSort((prev) => ({
-      key,
-      dir: prev.key === key && prev.dir === "asc" ? "desc" : "asc",
-    }));
   };
 
   const sortedOverrides = [...overrides].sort((a, b) => {
@@ -752,34 +879,21 @@ export default function LeaveManagement() {
     return overrideSort.dir === "asc" ? cmp : -cmp;
   });
 
-  const activePolicies = policies.filter((p) => p.active);
-  const now = new Date();
-  const yearStart = new Date(now.getFullYear(), 0, 1);
-  const employeeBalances = employees.map((emp) => {
-    const join = emp.joining_date ? new Date(emp.joining_date) : yearStart;
-    const startRef = join > yearStart ? join : yearStart;
-    const monthsWorked = Math.max(
-      0,
-      (now.getFullYear() - startRef.getFullYear()) * 12 +
-        (now.getMonth() - startRef.getMonth()) +
-        1,
-    );
-
-    const types = activePolicies.map((policy) => {
-      const balance = allBalances.find(
-        (b) => b.employee_id === emp.id && b.leave_type_id === policy.id,
-      );
-      return {
-        type: policy.name,
-        policyId: policy.id,
-        total: balance?.total ?? policy.annualQuota,
-        used: balance?.used ?? 0,
-        remaining: balance?.remaining ?? policy.annualQuota,
-      };
+  const openOverrideDialog = (
+    employeeId: string,
+    leaveType: string,
+    currentTotal: number,
+  ) => {
+    setNewOverride({
+      employeeId,
+      leaveType,
+      customQuota: currentTotal,
+      reason: "",
     });
-    return { employee: emp, types };
-  });
+    setOverrideDialog(true);
+  };
 
+  // ─── Render ───────────────────────────────────────────────────────────────
   return (
     <motion.div
       variants={container}
@@ -956,7 +1070,11 @@ export default function LeaveManagement() {
                 {selectedRequest.status !== "Pending" && (
                   <div className="flex items-center gap-3">
                     <div
-                      className={`w-2 h-2 rounded-full ${selectedRequest.status === "Approved" ? "bg-success" : "bg-destructive"}`}
+                      className={`w-2 h-2 rounded-full ${
+                        selectedRequest.status === "Approved"
+                          ? "bg-success"
+                          : "bg-destructive"
+                      }`}
                     />
                     <p className="text-sm">
                       Leave{" "}
@@ -1286,11 +1404,28 @@ export default function LeaveManagement() {
                             key={h.id}
                             className="flex items-center gap-3 px-3 py-2.5 rounded-md hover:bg-muted/50 transition-colors"
                           >
-                            <CalendarDays className="w-4 h-4 text-primary shrink-0" />
+                            <div className="w-10 h-10 rounded-lg bg-primary/10 flex flex-col items-center justify-center shrink-0">
+                              <span className="text-[12px] font-bold text-primary leading-none">
+                                {new Date(h.start_date)
+                                  .toLocaleDateString("en", { month: "short" })
+                                  .toUpperCase()}
+                              </span>
+                              <span className="text-[12px]">
+                                {new Date(h.start_date).toLocaleDateString(
+                                  "en",
+                                  { day: "numeric" },
+                                )}
+                                {h.start_date !== h.end_date &&
+                                  ` - ${new Date(h.end_date).toLocaleDateString("en", { day: "numeric" })}`}
+                              </span>
+                            </div>
                             <div className="flex-1 min-w-0">
                               <p className="text-sm font-medium">{h.name}</p>
                               <p className="text-xs text-muted-foreground font-mono-data">
-                                {h.start_date} → {h.end_date}
+                                {calculateDays(h.start_date, h.end_date)}{" "}
+                                {calculateDays(h.start_date, h.end_date) === 1
+                                  ? "day"
+                                  : "days"}
                               </p>
                             </div>
                             <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary capitalize">
@@ -1447,29 +1582,27 @@ export default function LeaveManagement() {
                                     .toUpperCase()}
                                 </span>
                                 {h.start_date === h.end_date ? (
-                                  <span className="text-[12px] ">
+                                  <span>
                                     {new Date(h.start_date).toLocaleDateString(
                                       "en",
-                                      {
-                                        day: "numeric",
-                                      },
+                                      { day: "numeric" },
                                     )}
                                   </span>
                                 ) : (
-                                  <span className="text-[12px] ">
-                                    {new Date(h.start_date).toLocaleDateString(
-                                      "en",
-                                      {
+                                  <span className=" flex whitespace-nowrap text-[12px]">
+                                    <span>
+                                      {new Date(
+                                        h.start_date,
+                                      ).toLocaleDateString("en", {
                                         day: "numeric",
-                                      },
-                                    )}
-                                    {" - "}
-                                    {new Date(h.end_date).toLocaleDateString(
-                                      "en",
-                                      {
-                                        day: "numeric",
-                                      },
-                                    )}
+                                      })}
+                                      -
+                                    </span>
+
+                                    <span>
+                                      {h.start_date !== h.end_date &&
+                                        ` ${new Date(h.end_date).toLocaleDateString("en", { day: "numeric" })}`}
+                                    </span>
                                   </span>
                                 )}
                               </div>
@@ -1509,7 +1642,7 @@ export default function LeaveManagement() {
                 </div>
               </TabsContent>
 
-              {/* LEAVE POLICIES — HR only */}
+              {/* LEAVE POLICIES */}
               {isHR && (
                 <TabsContent value="policies" className="space-y-4 mt-4">
                   <div className="flex items-center justify-between">
@@ -1729,7 +1862,8 @@ export default function LeaveManagement() {
                 </TabsContent>
               )}
 
-              {/* EMPLOYEE BALANCES — HR only */}
+              {/* LEAVE BALANCES */}
+
               {isHR && (
                 <TabsContent value="balances" className="space-y-4 mt-4">
                   <div className="flex items-center justify-between">
@@ -1744,7 +1878,16 @@ export default function LeaveManagement() {
                     </div>
                     <Dialog
                       open={overrideDialog}
-                      onOpenChange={setOverrideDialog}
+                      onOpenChange={(open) => {
+                        setOverrideDialog(open);
+                        if (!open)
+                          setNewOverride({
+                            employeeId: "",
+                            leaveType: "",
+                            customQuota: 0,
+                            reason: "",
+                          });
+                      }}
                     >
                       <DialogTrigger asChild>
                         <Button size="sm" className="gap-1.5 press-effect">
@@ -1767,6 +1910,8 @@ export default function LeaveManagement() {
                                 setNewOverride({
                                   ...newOverride,
                                   employeeId: v,
+                                  leaveType: "",
+                                  customQuota: 0,
                                 })
                               }
                             >
@@ -1776,7 +1921,8 @@ export default function LeaveManagement() {
                               <SelectContent>
                                 {employees.map((e) => (
                                   <SelectItem key={e.id} value={e.id}>
-                                    {e.first_name} — {e.department}
+                                    {e.first_name} {e.last_name} —{" "}
+                                    {e.department}
                                   </SelectItem>
                                 ))}
                               </SelectContent>
@@ -1808,18 +1954,28 @@ export default function LeaveManagement() {
                             <label className="text-xs text-muted-foreground mb-1 block">
                               Custom Quota (days)
                             </label>
+                            {/* no min prop — allows negative values */}
                             <Input
                               type="number"
-                              min={0}
                               value={newOverride.customQuota}
                               onChange={(e) =>
                                 setNewOverride({
                                   ...newOverride,
-                                  customQuota: +e.target.value,
+                                  customQuota: Number(e.target.value),
                                 })
                               }
                               className="h-9 text-sm font-mono-data"
+                              step={1}
                             />
+                            {newOverride.leaveType && (
+                              <p className="text-[10px] text-muted-foreground mt-1">
+                                Policy default:{" "}
+                                {policies.find(
+                                  (p) => p.name === newOverride.leaveType,
+                                )?.annualQuota ?? "—"}{" "}
+                                days
+                              </p>
+                            )}
                           </div>
                           <div>
                             <label className="text-xs text-muted-foreground mb-1 block">
@@ -1854,185 +2010,286 @@ export default function LeaveManagement() {
                     </Dialog>
                   </div>
 
-                  {/* Replace the Active Customizations section */}
+                  {/* Active Customisations */}
                   <div className="bg-card border border-border rounded-lg overflow-hidden">
                     <div className="px-4 py-3 border-b border-border flex items-center justify-between">
                       <h4 className="text-sm font-medium">
                         Active Customizations
                       </h4>
                       <span className="text-xs text-muted-foreground">
-                        {
-                          allBalances.filter((b) => {
-                            const policy = policies.find(
-                              (p) => p.id === b.leave_type_id,
-                            );
-                            return policy && b.total !== policy.annualQuota;
-                          }).length
-                        }{" "}
-                        custom rule(s)
+                        {customizedBalances.length} custom rule(s)
                       </span>
                     </div>
-                    {(() => {
-                      const customized = allBalances.filter((b) => {
-                        const policy = policies.find(
-                          (p) => p.id === b.leave_type_id,
-                        );
-                        return policy && b.total !== policy.annualQuota;
-                      });
-                      return customized.length === 0 ? (
-                        <div className="p-6 text-center text-xs text-muted-foreground">
-                          No custom leave rules yet. Click "Customize Leave" to
-                          override an employee's quota.
-                        </div>
-                      ) : (
-                        <table className="nexus-table">
-                          <thead>
-                            <tr>
-                              <th>Employee</th>
-                              <th>Leave Type</th>
-                              <th>Custom Quota</th>
-                              <th>Default Quota</th>
-                              <th>Used</th>
-                              <th>Remaining</th>
-                              <th className="w-20">Actions</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {customized.map((b) => {
-                              const policy = policies.find(
-                                (p) => p.id === b.leave_type_id,
-                              );
-                              return (
-                                <tr key={b.id}>
-                                  <td className="text-sm font-medium">
-                                    {b.employee.first_name}{" "}
-                                    {b.employee.last_name}
-                                  </td>
-                                  <td className="text-sm text-muted-foreground">
-                                    {b.leavePolicy.name}
-                                  </td>
-                                  <td className="font-mono-data text-xs font-semibold text-primary">
-                                    {b.total} days
-                                  </td>
-                                  <td className="font-mono-data text-xs text-muted-foreground">
-                                    {policy?.annualQuota ?? "—"} days
-                                  </td>
-                                  <td className="font-mono-data text-xs">
-                                    {b.used}
-                                  </td>
-                                  <td className="font-mono-data text-xs">
-                                    <span
-                                      className={
-                                        b.remaining < 0
-                                          ? "text-destructive font-semibold"
-                                          : ""
-                                      }
-                                    >
-                                      {b.remaining}
-                                    </span>
-                                  </td>
-                                  <td>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      className="h-6 px-1.5"
-                                      onClick={() => {
-                                        const policyName =
-                                          policies.find(
-                                            (p) => p.id === b.leave_type_id,
-                                          )?.name ?? "";
-                                        setNewOverride({
-                                          employeeId: b.employee_id,
-                                          leaveType: policyName,
-                                          customQuota: b.total,
-                                          reason: "",
-                                        });
-                                        setOverrideDialog(true);
-                                      }}
-                                    >
-                                      <Edit2 className="w-3 h-3" />
-                                    </Button>
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      );
-                    })()}
-                  </div>
-
-                  <div className="bg-card border border-border rounded-lg overflow-hidden">
-                    <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-                      <h4 className="text-sm font-medium">
-                        All Employee Leave Balances
-                      </h4>
-                      <button
-                        onClick={fetchAllBalances}
-                        className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-                      >
-                        {balancesLoading ? "Refreshing…" : "Refresh"}
-                      </button>
-                    </div>
-                    {balancesLoading ? (
-                      <div className="p-8 text-center text-xs text-muted-foreground">
-                        Loading balances…
+                    {customizedBalances.length === 0 ? (
+                      <div className="p-6 text-center text-xs text-muted-foreground">
+                        No custom leave rules yet. Click any balance cell or
+                        "Customize Leave" to override a quota.
                       </div>
                     ) : (
                       <table className="nexus-table">
                         <thead>
                           <tr>
                             <th>Employee</th>
-                            {activePolicies.map((p) => (
-                              <th key={p.id} className="text-center">
-                                {p.name}
-                              </th>
-                            ))}
+                            <th>Leave Type</th>
+                            <th>Custom Total</th>
+                            <th>Policy Default</th>
+                            <th>Used</th>
+                            <th>Remaining</th>
+                            <th className="w-20">Actions</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {employeeBalances.length === 0 ? (
-                            <tr>
-                              <td
-                                colSpan={activePolicies.length + 1}
-                                className="text-center text-sm text-muted-foreground py-8"
-                              >
-                                No balance data yet. Balances are created when
-                                leaves are approved.
-                              </td>
-                            </tr>
-                          ) : (
-                            employeeBalances.map(({ employee, types }) => (
-                              <tr key={employee.id}>
+                          {customizedBalances.map((b) => {
+                            const policy = policies.find(
+                              (p) => p.id === b.leave_type_id,
+                            );
+                            const remaining = b.total - b.used;
+                            return (
+                              <tr key={`${b.id}-${b.employee_id}`}>
                                 <td className="text-sm font-medium">
-                                  {employee.first_name} {employee.last_name}
+                                  {b.employee?.first_name ?? "Unknown"}{" "}
+                                  {b.employee?.last_name ?? ""}
+                                  {b.employee?.department && (
+                                    <p className="text-[10px] text-muted-foreground font-normal">
+                                      {b.employee.department}
+                                    </p>
+                                  )}
                                 </td>
-                                {types.map((t) => (
-                                  <td key={t.policyId} className="text-center">
-                                    <div className="inline-flex flex-col items-center gap-0.5">
-                                      <span className="font-mono-data text-xs">
-                                        <span
-                                          className={`font-semibold ${t.remaining < 0 ? "text-destructive" : ""}`}
-                                        >
-                                          {t.remaining}
-                                        </span>
-                                        <span className="text-muted-foreground">
-                                          /{t.total}
-                                        </span>
+                                <td className="text-sm text-muted-foreground">
+                                  <span className="flex items-center gap-1.5">
+                                    {b.leave_type}
+                                    {policy?.proRata && (
+                                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-600 dark:bg-blue-950 dark:text-blue-400 font-medium">
+                                        pro-rata
                                       </span>
-                                      {t.used > 0 && (
-                                        <span className="text-[9px] text-muted-foreground">
-                                          {t.used} used
-                                        </span>
-                                      )}
-                                    </div>
-                                  </td>
-                                ))}
+                                    )}
+                                  </span>
+                                </td>
+                                <td className="font-mono-data text-xs font-semibold text-primary">
+                                  {b.total}d
+                                </td>
+                                <td className="font-mono-data text-xs text-muted-foreground">
+                                  {policy?.annualQuota ?? "—"}d
+                                </td>
+                                <td className="font-mono-data text-xs">
+                                  {b.used}d
+                                </td>
+                                <td>
+                                  <span
+                                    className={`font-mono-data text-xs font-semibold ${remaining < 0 ? "text-destructive" : remaining <= 2 ? "text-amber-500" : "text-success"}`}
+                                  >
+                                    {remaining}d
+                                  </span>
+                                </td>
+                                <td>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 px-1.5"
+                                    onClick={() =>
+                                      openOverrideDialog(
+                                        b.employee_id,
+                                        policies.find(
+                                          (p) => p.id === b.leave_type_id,
+                                        )?.name ?? "",
+                                        b.total,
+                                      )
+                                    }
+                                  >
+                                    <Edit2 className="w-3 h-3" />
+                                  </Button>
+                                </td>
                               </tr>
-                            ))
-                          )}
+                            );
+                          })}
                         </tbody>
                       </table>
+                    )}
+                  </div>
+
+                  {/* Main Balance Matrix */}
+                  <div className="bg-card border border-border rounded-lg overflow-hidden">
+                    <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <h4 className="text-sm font-medium">
+                          All Employee Leave Balances
+                        </h4>
+                        <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                          <span className="flex items-center gap-1">
+                            <span className="w-2 h-2 rounded-full bg-success inline-block" />
+                            OK
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <span className="w-2 h-2 rounded-full bg-amber-400 inline-block" />
+                            Low (≤2)
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <span className="w-2 h-2 rounded-full bg-destructive inline-block" />
+                            Overdrawn
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setSortEmployeeName((prev) =>
+                              prev === "asc"
+                                ? "desc"
+                                : prev === "desc"
+                                  ? null
+                                  : "asc",
+                            )
+                          }
+                          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          Name
+                          {sortEmployeeName === "asc" ? (
+                            <ArrowUp className="h-3 w-3" />
+                          ) : sortEmployeeName === "desc" ? (
+                            <ArrowDown className="h-3 w-3" />
+                          ) : (
+                            <ArrowUpDown className="h-3 w-3" />
+                          )}
+                        </button>
+                        <button
+                          onClick={fetchAllBalances}
+                          className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          {balancesLoading ? "Refreshing…" : "↻ Refresh"}
+                        </button>
+                      </div>
+                    </div>
+
+                    {balancesLoading ? (
+                      <div className="p-8 text-center text-xs text-muted-foreground">
+                        Loading balances…
+                      </div>
+                    ) : sortedEmployeeBalances.length === 0 ? (
+                      <div className="p-8 text-center text-xs text-muted-foreground">
+                        No employees found.
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="nexus-table w-full">
+                          <thead>
+                            <tr>
+                              <th className="sticky left-0 bg-card z-10 min-w-[160px]">
+                                Employee
+                              </th>
+                              {activePolicies.map((p) => (
+                                <th
+                                  key={p.id}
+                                  className="text-center min-w-[110px]"
+                                >
+                                  <div className="flex flex-col items-center gap-0.5">
+                                    <span>{p.name}</span>
+                                    <div className="flex items-center gap-1">
+                                      {p.proRata && (
+                                        <span className="text-[9px] px-1 py-0.5 rounded bg-blue-100 text-blue-600 dark:bg-blue-950 dark:text-blue-400 font-medium leading-none">
+                                          pro-rata
+                                        </span>
+                                      )}
+                                      <span className="text-[9px] text-muted-foreground font-normal">
+                                        {p.proRata
+                                          ? "1/mo"
+                                          : `${p.annualQuota}d`}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {sortedEmployeeBalances.map(
+                              ({ employee, types }) => (
+                                <tr key={employee.id}>
+                                  <td className="sticky left-0 bg-card z-10 text-sm font-medium whitespace-nowrap">
+                                    {employee.first_name} {employee.last_name}
+                                    <p className="text-[10px] text-muted-foreground font-normal">
+                                      {employee.department}
+                                    </p>
+                                  </td>
+                                  {types.map((t) => {
+                                    const pct =
+                                      t.total > 0
+                                        ? Math.round((t.used / t.total) * 100)
+                                        : 0;
+                                    const statusColor =
+                                      t.remaining < 0
+                                        ? "text-destructive"
+                                        : t.remaining <= 2
+                                          ? "text-amber-500"
+                                          : "text-success";
+                                    const barColor =
+                                      pct >= 100
+                                        ? "bg-destructive"
+                                        : pct >= 75
+                                          ? "bg-amber-400"
+                                          : "bg-primary";
+                                    const policy = activePolicies.find(
+                                      (p) => p.id === t.policyId,
+                                    );
+                                    const isCustomized =
+                                      policy && t.total !== policy.annualQuota;
+
+                                    return (
+                                      <td
+                                        key={t.policyId}
+                                        className="text-center p-2"
+                                      >
+                                        <button
+                                          type="button"
+                                          title={`${t.type}: ${t.remaining} remaining / ${t.used} used / ${t.total} total${t.isProRata ? " (pro-rata 1/mo)" : ""}${isCustomized ? " [customized]" : ""}${!t.hasDbRow && t.isProRata ? " — no approved leave yet" : ""}`}
+                                          className="group inline-flex flex-col items-center gap-1 rounded-md px-2 py-1.5 hover:bg-muted/60 transition-colors cursor-pointer w-full"
+                                          onClick={() =>
+                                            openOverrideDialog(
+                                              employee.id,
+                                              t.type,
+                                              t.total,
+                                            )
+                                          }
+                                        >
+                                          <span
+                                            className={`font-mono-data text-sm font-bold leading-none ${statusColor}`}
+                                          >
+                                            {t.remaining}
+                                          </span>
+                                          <span className="text-[9px] text-muted-foreground leading-none">
+                                            {t.used}/{t.total}d
+                                            {isCustomized && (
+                                              <span className="ml-1 text-primary">
+                                                ✎
+                                              </span>
+                                            )}
+                                            {!t.hasDbRow && t.isProRata && (
+                                              <span className="ml-1 opacity-50">
+                                                —
+                                              </span>
+                                            )}
+                                          </span>
+                                          <div className="w-full h-1 bg-muted rounded-full overflow-hidden">
+                                            <div
+                                              className={`h-full rounded-full transition-all ${barColor}`}
+                                              style={{
+                                                width: `${Math.min(pct, 100)}%`,
+                                              }}
+                                            />
+                                          </div>
+                                          <span className="text-[9px] text-primary opacity-0 group-hover:opacity-100 transition-opacity leading-none">
+                                            edit
+                                          </span>
+                                        </button>
+                                      </td>
+                                    );
+                                  })}
+                                </tr>
+                              ),
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
                     )}
                   </div>
                 </TabsContent>
@@ -2417,6 +2674,71 @@ export default function LeaveManagement() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Employee Leave Balance Cards */}
+      {!isHR && (
+        <>
+          <div className="font-semibold text-md">My Leave Balance</div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+            {leaveBalance?.length > 0 ? (
+              leaveBalance.map((lb) => {
+                const total = lb.total ?? 0;
+                const used = lb.used ?? 0;
+                const remaining = lb.remaining ?? total - used;
+                const percentage =
+                  total > 0 ? Math.round((used / total) * 100) : 0;
+                const Icon =
+                  leaveTypeIcons[lb.leave_type?.toLowerCase()] ?? Briefcase;
+                return (
+                  <div
+                    key={lb.leave_type}
+                    className="group relative bg-card border border-border rounded-xl p-5 hover:shadow-md hover:border-primary/40 transition-all duration-300"
+                  >
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <div className="p-2 rounded-md bg-primary/10 text-primary">
+                          <Icon className="w-4 h-4" />
+                        </div>
+                        <p className="text-sm font-semibold">{lb.leave_type}</p>
+                      </div>
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary">
+                        {percentage}%
+                      </span>
+                    </div>
+                    <div className="mb-3">
+                      <p className="text-2xl font-bold tracking-tight">
+                        {remaining}
+                        <span className="text-sm font-normal text-muted-foreground ml-1">
+                          days left
+                        </span>
+                      </p>
+                    </div>
+                    <div className="flex justify-between text-xs text-muted-foreground mb-3">
+                      <span>Used: {used}</span>
+                      <span>Total: {total}</span>
+                    </div>
+                    {total > 0 && (
+                      <div className="h-2 bg-muted rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all duration-500 ${percentage > 80 ? "bg-red-500" : percentage > 60 ? "bg-amber-500" : "bg-primary"}`}
+                          style={{ width: `${Math.min(percentage, 100)}%` }}
+                        />
+                      </div>
+                    )}
+                    <div className="absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100 transition pointer-events-none bg-gradient-to-r from-primary/5 to-transparent" />
+                  </div>
+                );
+              })
+            ) : (
+              <div className="col-span-full py-12 text-center border-2 border-dashed border-border rounded-xl">
+                <p className="text-sm text-muted-foreground">
+                  No leave records found.
+                </p>
+              </div>
+            )}
+          </div>
+        </>
+      )}
     </motion.div>
   );
 }

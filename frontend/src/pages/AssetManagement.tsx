@@ -51,6 +51,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Asset } from "@/types";
 import { Textarea } from "@/components/ui/textarea";
 import { DialogDescription } from "@radix-ui/react-dialog";
+import { Protected } from "@/components/common/ProtectedRoute";
 
 // ─── Animation variants ───────────────────────────────────────────────────────
 const container = {
@@ -146,6 +147,7 @@ const mapAsset = (a: AssetApi): Asset => ({
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function AssetManagement() {
   const { isHR } = useRole();
+
   const { toast } = useToast();
 
   const [search, setSearch] = useState("");
@@ -671,114 +673,117 @@ export default function AssetManagement() {
             </Button>
 
             {/* Add Asset dialog */}
-            <Dialog open={addDialog} onOpenChange={setAddDialog}>
-              <DialogTrigger asChild>
-                <Button size="sm" className="gap-1.5 press-effect">
-                  <Plus className="w-3.5 h-3.5" /> Add Asset
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-w-md">
-                <DialogHeader>
-                  <DialogTitle>Add New Asset</DialogTitle>
-                </DialogHeader>
-                <div className="space-y-3 pt-2">
-                  <div>
-                    <label className="text-xs text-muted-foreground mb-1 block">
-                      Asset ID *
-                    </label>
-                    <Input
-                      value={newAsset.assetId}
-                      onChange={(e) =>
-                        setNewAsset({ ...newAsset, assetId: e.target.value })
-                      }
-                      className="h-8 text-sm"
-                      placeholder="e.g., LAP-001"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-muted-foreground mb-1 block">
-                      Asset Name *
-                    </label>
-                    <Input
-                      value={newAsset.name}
-                      onChange={(e) =>
-                        setNewAsset({ ...newAsset, name: e.target.value })
-                      }
-                      className="h-8 text-sm"
-                      placeholder='e.g., MacBook Pro 16"'
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
+            <Protected allPermissions={["assets:create"]}>
+              {" "}
+              <Dialog open={addDialog} onOpenChange={setAddDialog}>
+                <DialogTrigger asChild>
+                  <Button size="sm" className="gap-1.5 press-effect">
+                    <Plus className="w-3.5 h-3.5" /> Add Asset
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-md">
+                  <DialogHeader>
+                    <DialogTitle>Add New Asset</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-3 pt-2">
                     <div>
                       <label className="text-xs text-muted-foreground mb-1 block">
-                        Type *
+                        Asset ID *
                       </label>
-                      <Select
-                        value={newAsset.type}
-                        onValueChange={(v) =>
-                          setNewAsset({ ...newAsset, type: v })
+                      <Input
+                        value={newAsset.assetId}
+                        onChange={(e) =>
+                          setNewAsset({ ...newAsset, assetId: e.target.value })
                         }
+                        className="h-8 text-sm"
+                        placeholder="e.g., LAP-001"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground mb-1 block">
+                        Asset Name *
+                      </label>
+                      <Input
+                        value={newAsset.name}
+                        onChange={(e) =>
+                          setNewAsset({ ...newAsset, name: e.target.value })
+                        }
+                        className="h-8 text-sm"
+                        placeholder='e.g., MacBook Pro 16"'
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs text-muted-foreground mb-1 block">
+                          Type *
+                        </label>
+                        <Select
+                          value={newAsset.type}
+                          onValueChange={(v) =>
+                            setNewAsset({ ...newAsset, type: v })
+                          }
+                        >
+                          <SelectTrigger className="h-8 text-xs">
+                            <SelectValue placeholder="Select" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {assetTypes.map((t) => (
+                              <SelectItem key={t} value={t} className="text-xs">
+                                {t}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <label className="text-xs text-muted-foreground mb-1 block">
+                          Serial Number
+                        </label>
+                        <Input
+                          value={newAsset.serialNumber}
+                          onChange={(e) =>
+                            setNewAsset({
+                              ...newAsset,
+                              serialNumber: e.target.value,
+                            })
+                          }
+                          placeholder="e.g., SN-123456789"
+                          className="h-8 text-xs font-mono-data"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-muted-foreground mb-1 block">
+                          Purchase Date
+                        </label>
+                        <Input
+                          type="date"
+                          value={newAsset.purchaseDate}
+                          onChange={(e) =>
+                            setNewAsset({
+                              ...newAsset,
+                              purchaseDate: e.target.value,
+                            })
+                          }
+                          className="h-8 text-xs"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex justify-end gap-2 pt-1">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setAddDialog(false)}
                       >
-                        <SelectTrigger className="h-8 text-xs">
-                          <SelectValue placeholder="Select" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {assetTypes.map((t) => (
-                            <SelectItem key={t} value={t} className="text-xs">
-                              {t}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <label className="text-xs text-muted-foreground mb-1 block">
-                        Serial Number
-                      </label>
-                      <Input
-                        value={newAsset.serialNumber}
-                        onChange={(e) =>
-                          setNewAsset({
-                            ...newAsset,
-                            serialNumber: e.target.value,
-                          })
-                        }
-                        placeholder="e.g., SN-123456789"
-                        className="h-8 text-xs font-mono-data"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs text-muted-foreground mb-1 block">
-                        Purchase Date
-                      </label>
-                      <Input
-                        type="date"
-                        value={newAsset.purchaseDate}
-                        onChange={(e) =>
-                          setNewAsset({
-                            ...newAsset,
-                            purchaseDate: e.target.value,
-                          })
-                        }
-                        className="h-8 text-xs"
-                      />
+                        Cancel
+                      </Button>
+                      <Button size="sm" onClick={handleAddAsset}>
+                        Add Asset
+                      </Button>
                     </div>
                   </div>
-                  <div className="flex justify-end gap-2 pt-1">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setAddDialog(false)}
-                    >
-                      Cancel
-                    </Button>
-                    <Button size="sm" onClick={handleAddAsset}>
-                      Add Asset
-                    </Button>
-                  </div>
-                </div>
-              </DialogContent>
-            </Dialog>
+                </DialogContent>
+              </Dialog>
+            </Protected>
           </div>
         )}
       </motion.div>
@@ -846,34 +851,38 @@ export default function AssetManagement() {
               </SelectContent>
             </Select>
           )}
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={handleExport}
-            className="gap-1.5"
-          >
-            Export Excel
-          </Button>
 
-          <input
-            ref={importRef}
-            type="file"
-            accept=".xlsx,.xls"
-            className="hidden"
-            onChange={handleImport}
-          />
-          <Button
-            size="sm"
-            variant="outline"
-            className="gap-1.5 press-effect"
-            onClick={() => importRef.current?.click()}
-          >
-            <Upload className="w-3.5 h-3.5" /> Import
-          </Button>
+          <>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleExport}
+              className="gap-1.5"
+            >
+              Export Excel
+            </Button>
+
+            <input
+              ref={importRef}
+              type="file"
+              accept=".xlsx,.xls"
+              className="hidden"
+              onChange={handleImport}
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1.5 press-effect"
+              onClick={() => importRef.current?.click()}
+            >
+              <Upload className="w-3.5 h-3.5" /> Import
+            </Button>
+          </>
         </motion.div>
       )}
 
       {/* HR Assets Table */}
+
       {isHR && (
         <motion.div
           variants={item}
@@ -1076,12 +1085,14 @@ export default function AssetManagement() {
                                 Retire Asset
                               </DropdownMenuItem>
                             )}
-                            <DropdownMenuItem
-                              className="text-destructive"
-                              onClick={() => handleDeleteAsset(asset.id)}
-                            >
-                              Delete Asset
-                            </DropdownMenuItem>
+                            {
+                              <DropdownMenuItem
+                                className="text-destructive"
+                                onClick={() => handleDeleteAsset(asset.id)}
+                              >
+                                Delete Asset
+                              </DropdownMenuItem>
+                            }
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </td>
@@ -1578,6 +1589,7 @@ export default function AssetManagement() {
       )}
 
       {/* HR: Take-home Requests Inbox */}
+
       <Dialog open={inboxDialog} onOpenChange={setInboxDialog}>
         <DialogContent className="max-w-4xl">
           <DialogHeader>

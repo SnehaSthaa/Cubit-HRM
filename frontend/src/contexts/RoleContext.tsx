@@ -1,35 +1,72 @@
-import { createContext, useContext, useState, ReactNode } from "react";
+import { createContext, useContext, ReactNode, useMemo, useState } from "react";
+import { useAuth } from "./AuthContext";
+import { allPermission } from "@/permissions/allowed-permission";
 
 export type UserRole = "super_admin" | "hr_admin" | "employee";
 
 interface RoleContextValue {
   role: UserRole;
-  setRole: (role: UserRole) => void;
+  activeRole: UserRole;
+
   isAdmin: boolean;
   isHR: boolean;
   isEmployee: boolean;
+
+  // Permission helpers
+  requireAllPermission: (actions: string[]) => boolean;
+  requireAnyPermission: (actions: string[]) => boolean;
+
+  previewRole: UserRole | null;
+  setPreviewRole: (role: UserRole | null) => void;
 }
 
 const RoleContext = createContext<RoleContextValue | undefined>(undefined);
 
 export function RoleProvider({ children }: { children: ReactNode }) {
-  const [role, setRole] = useState<UserRole>(
-    () => (localStorage.getItem("cubit-role") as UserRole) || "super_admin"
-  );
+  const { user } = useAuth();
 
-  const handleSetRole = (newRole: UserRole) => {
-    setRole(newRole);
-    localStorage.setItem("cubit-role", newRole);
+  const [previewRole, setPreviewRole] = useState<UserRole | null>(null);
+
+  const role: UserRole = (user?.role as UserRole) ?? "employee";
+
+  const activeRole: UserRole = previewRole ?? role;
+
+  const permissions = allPermission[activeRole];
+
+  // Get all allowed actions
+  const allowedActions = useMemo(() => {
+    return Object.values(permissions).flatMap((mod) =>
+      Object.entries(mod)
+        .filter(([, value]) => value === true)
+        .map(([key]) => key),
+    );
+  }, [permissions]);
+
+  // Check if ALL permissions exist
+  const requireAllPermission = (actions: string[]): boolean => {
+    return actions.every((action) => allowedActions.includes(action));
+  };
+
+  // Check if ANY permission exists
+  const requireAnyPermission = (actions: string[]): boolean => {
+    return actions.some((action) => allowedActions.includes(action));
   };
 
   return (
     <RoleContext.Provider
       value={{
         role,
-        setRole: handleSetRole,
-        isAdmin: role === "super_admin",
-        isHR: role === "super_admin" || role === "hr_admin",
-        isEmployee: role === "employee",
+        activeRole,
+
+        isAdmin: activeRole === "super_admin",
+        isHR: activeRole === "super_admin" || activeRole === "hr_admin",
+        isEmployee: activeRole === "employee",
+
+        requireAllPermission,
+        requireAnyPermission,
+
+        previewRole,
+        setPreviewRole,
       }}
     >
       {children}
@@ -39,6 +76,10 @@ export function RoleProvider({ children }: { children: ReactNode }) {
 
 export function useRole() {
   const context = useContext(RoleContext);
-  if (!context) throw new Error("useRole must be used within RoleProvider");
+
+  if (!context) {
+    throw new Error("useRole must be used within RoleProvider");
+  }
+
   return context;
 }

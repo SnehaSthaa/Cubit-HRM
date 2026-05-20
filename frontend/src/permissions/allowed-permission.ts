@@ -1,0 +1,208 @@
+import {
+  AllowedType,
+  AttendanceAction,
+  DashboardAction,
+  EmployeesAction,
+  LeaveManagementAction,
+  PayrollAction,
+  AssetsAction,
+  OffboardingAction,
+  ReportsAction,
+  RolesandAccessAction,
+  EmployeeSelfServiceAction,
+} from "./permission";
+
+const super_admin: AllowedType = {
+  dashboard: {
+    [DashboardAction.View]: true,
+    [DashboardAction.Create]: true,
+    [DashboardAction.Edit]: true,
+    [DashboardAction.Delete]: true,
+  },
+  employee: {
+    [EmployeesAction.View]: true,
+    [EmployeesAction.Create]: true,
+    [EmployeesAction.Edit]: true,
+    [EmployeesAction.Delete]: true,
+  },
+  attendance: {
+    [AttendanceAction.View]: true,
+    [AttendanceAction.Create]: true,
+    [AttendanceAction.Edit]: true,
+    [AttendanceAction.Delete]: true,
+  },
+  leave_management: {
+    [LeaveManagementAction.View]: true,
+    [LeaveManagementAction.Create]: true,
+    [LeaveManagementAction.Edit]: true,
+    [LeaveManagementAction.Delete]: true,
+  },
+  payroll: {
+    [PayrollAction.View]: true,
+    [PayrollAction.Create]: true,
+    [PayrollAction.Edit]: true,
+    [PayrollAction.Delete]: true,
+  },
+  assets: {
+    [AssetsAction.View]: true,
+    [AssetsAction.Create]: true,
+    [AssetsAction.Edit]: true,
+    [AssetsAction.Delete]: true,
+  },
+  offboarding: {
+    [OffboardingAction.View]: true,
+    [OffboardingAction.Create]: true,
+    [OffboardingAction.Edit]: true,
+    [OffboardingAction.Delete]: true,
+  },
+  reports: {
+    [ReportsAction.View]: true,
+    [ReportsAction.Create]: true,
+    [ReportsAction.Edit]: true,
+    [ReportsAction.Delete]: true,
+  },
+  roles_and_access: {
+    [RolesandAccessAction.View]: true,
+    [RolesandAccessAction.Create]: true,
+    [RolesandAccessAction.Edit]: true,
+    [RolesandAccessAction.Delete]: true,
+  },
+  Employee_self_service: {
+    [EmployeeSelfServiceAction.View]: true,
+    [EmployeeSelfServiceAction.Create]: true,
+    [EmployeeSelfServiceAction.Edit]: true,
+    [EmployeeSelfServiceAction.Delete]: true,
+  },
+};
+
+const hr_admin: AllowedType = {
+  dashboard: {
+    [DashboardAction.View]: true,
+    [DashboardAction.Create]: false,
+    [DashboardAction.Edit]: false,
+    [DashboardAction.Delete]: false,
+  },
+  employee: {
+    [EmployeesAction.View]: true,
+    [EmployeesAction.Create]: true,
+    [EmployeesAction.Edit]: true,
+    [EmployeesAction.Delete]: true,
+  },
+  attendance: {
+    [AttendanceAction.View]: true,
+    [AttendanceAction.Create]: true,
+    [AttendanceAction.Edit]: true,
+    [AttendanceAction.Delete]: false,
+  },
+  leave_management: {
+    [LeaveManagementAction.View]: true,
+    [LeaveManagementAction.Create]: true,
+    [LeaveManagementAction.Edit]: true,
+    [LeaveManagementAction.Delete]: true,
+  },
+  payroll: {
+    [PayrollAction.View]: true,
+    [PayrollAction.Create]: true,
+    [PayrollAction.Edit]: true,
+    [PayrollAction.Delete]: false,
+  },
+  assets: {
+    [AssetsAction.View]: true,
+    [AssetsAction.Create]: true,
+    [AssetsAction.Edit]: true,
+    [AssetsAction.Delete]: true,
+  },
+  offboarding: {
+    [OffboardingAction.View]: true,
+    [OffboardingAction.Create]: true,
+    [OffboardingAction.Edit]: true,
+    [OffboardingAction.Delete]: false,
+  },
+  reports: {
+    [ReportsAction.View]: true,
+    [ReportsAction.Create]: false,
+    [ReportsAction.Edit]: false,
+    [ReportsAction.Delete]: false,
+  },
+  roles_and_access: {
+    [RolesandAccessAction.View]: true,
+    [RolesandAccessAction.Create]: false,
+    [RolesandAccessAction.Edit]: false,
+    [RolesandAccessAction.Delete]: false,
+  },
+  Employee_self_service: {
+    [EmployeeSelfServiceAction.View]: true,
+    [EmployeeSelfServiceAction.Create]: false,
+    [EmployeeSelfServiceAction.Edit]: true,
+    [EmployeeSelfServiceAction.Delete]: false,
+  },
+};
+
+const employee: AllowedType = {
+  dashboard: {
+    [DashboardAction.View]: true,
+    [DashboardAction.Create]: false,
+    [DashboardAction.Edit]: false,
+    [DashboardAction.Delete]: false,
+  },
+  employee: {
+    [EmployeesAction.View]: true,
+    [EmployeesAction.Create]: false,
+    [EmployeesAction.Edit]: false,
+    [EmployeesAction.Delete]: false,
+  },
+  attendance: {
+    [AttendanceAction.View]: true,
+    [AttendanceAction.Create]: false,
+    [AttendanceAction.Edit]: false,
+    [AttendanceAction.Delete]: false,
+  },
+  leave_management: {
+    [LeaveManagementAction.View]: true,
+    [LeaveManagementAction.Create]: true,
+    [LeaveManagementAction.Edit]: false,
+    [LeaveManagementAction.Delete]: false,
+  },
+  payroll: {
+    [PayrollAction.View]: true,
+    [PayrollAction.Create]: false,
+    [PayrollAction.Edit]: false,
+    [PayrollAction.Delete]: false,
+  },
+  assets: {
+    [AssetsAction.View]: true,
+    [AssetsAction.Create]: true,
+    [AssetsAction.Edit]: false,
+    [AssetsAction.Delete]: false,
+  },
+  offboarding: {
+    [OffboardingAction.View]: false,
+    [OffboardingAction.Create]: false,
+    [OffboardingAction.Edit]: false,
+    [OffboardingAction.Delete]: false,
+  },
+  reports: {
+    [ReportsAction.View]: false,
+    [ReportsAction.Create]: false,
+    [ReportsAction.Edit]: false,
+    [ReportsAction.Delete]: false,
+  },
+  roles_and_access: {
+    [RolesandAccessAction.View]: false,
+    [RolesandAccessAction.Create]: false,
+    [RolesandAccessAction.Edit]: false,
+    [RolesandAccessAction.Delete]: false,
+  },
+  Employee_self_service: {
+    [EmployeeSelfServiceAction.View]: true,
+    [EmployeeSelfServiceAction.Create]: false,
+    [EmployeeSelfServiceAction.Edit]: true,
+    [EmployeeSelfServiceAction.Delete]: false,
+  },
+};
+
+export const allPermission = {
+  super_admin: super_admin,
+  hr_admin: hr_admin,
+  employee: employee,
+};

@@ -62,6 +62,9 @@ export const hasRequiredPermission = (permissions: string[]) => {
     }
     const userRole = user.role;
     const permissionsForUserRole = allPermission[userRole];
+    //database fetch
+    //user role
+
     //flattern the permission to the arrary
     //only extrat string value
 

@@ -7,15 +7,15 @@ datasource db {
 }
 
 model User {
-  id            String    @id @default(uuid()) @db.Uuid
-  email         String    @unique
+  id            String     @id @default(uuid()) @db.Uuid
+  email         String     @unique
   password_hash String
   name          String
   phone         String?
-  role          UserRole
-  is_active     Boolean   @default(true)
-  created_at    DateTime  @default(now())
-  updated_at    DateTime  @updatedAt
+  role          UserRole[]
+  is_active     Boolean    @default(true)
+  created_at    DateTime   @default(now())
+  updated_at    DateTime   @updatedAt
   employee      Employee?
   reports       Report[]
   assets        Asset[]
@@ -24,33 +24,33 @@ model User {
 }
 
 model Employee {
-  id                   String    @id @default(uuid()) @db.Uuid
-  user_id              String    @unique @db.Uuid
-  employee_id          String    @unique
+  id                   String           @id @default(uuid()) @db.Uuid
+  user_id              String           @unique @db.Uuid
+  employee_id          String           @unique
   first_name           String
   last_name            String
-  date_of_birth        DateTime? @db.Date
+  date_of_birth        DateTime?        @db.Date
   gender               String?
   phone                String?
-  email                String    @unique
+  email                String           @unique
   department           String
   position             String?
-  joining_date         DateTime  @db.Date
-  salary               Decimal?  @db.Decimal(12, 2)
-  manager_id           String?   @db.Uuid
+  joining_date         DateTime         @db.Date
+  salary               Decimal?         @db.Decimal(12, 2)
+  manager_id           String?          @db.Uuid
   city                 String?
   state                String?
   postal_code          String?
   notes                String?
-  created_at           DateTime  @default(now())
-  updated_at           DateTime  @updatedAt
+  created_at           DateTime         @default(now())
+  updated_at           DateTime         @updatedAt
   account_number       String?
   bank_name            String?
   branch               String?
   contract_type        String?
   current_address      String?
-  employment_status    String    @default("Active")
-  employment_type      String    @default("Full-time")
+  employment_status    EmploymentStatus @default(active)
+  employment_type      String           @default("Full-time")
   father_name          String?
   grandfather_name     String?
   hierarchy            String?
@@ -60,12 +60,12 @@ model Employee {
   mother_name          String?
   permanent_address    String?
   previous_experience  String?
-  citizenship_number   String?   @unique
-  nid_number           String?   @unique
-  pan_number           String?   @unique
-  ssid_number          String?   @unique
-  employee_verified    Boolean   @default(false)
-  verification_pending Boolean   @default(false)
+  citizenship_number   String?          @unique
+  nid_number           String?          @unique
+  pan_number           String?          @unique
+  ssid_number          String?          @unique
+  employee_verified    Boolean          @default(false)
+  verification_pending Boolean          @default(false)
 
   assets            Asset[]            @relation("AssetAssignee")
   attendance        Attendance[]
@@ -140,7 +140,7 @@ model Leave {
   created_at     DateTime    @default(now())
   updated_at     DateTime    @updatedAt
   employee       Employee    @relation(fields: [employee_id], references: [id], onDelete: Cascade)
-  leaveType      LeavePolicy @relation(fields: [leave_type_id], references: [id])
+  leaveType      LeavePolicy @relation(fields: [leave_type_id], references: [id], onDelete: Cascade)
 
   @@map("leaves")
 }
@@ -264,17 +264,25 @@ model LeaveBalance {
 
   leave_type_id String @db.Uuid
 
-  used          Int         @default(0)
-  remaining     Int         @default(0)
-  created_at    DateTime    @default(now())
-  updated_at    DateTime    @updatedAt
-  total         Int         @default(0)
-  leavePolicyId String?     @db.Uuid
-  employee      Employee    @relation(fields: [employee_id], references: [id], onDelete: Cascade)
-  leavePolicy   LeavePolicy @relation(fields: [leave_type_id], references: [id])
+  used Int @default(0)
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  total      Int      @default(0)
+
+  employee    Employee    @relation(fields: [employee_id], references: [id], onDelete: Cascade)
+  leavePolicy LeavePolicy @relation(fields: [leave_type_id], references: [id], onDelete: Cascade)
 
   @@unique([employee_id, year, leave_type_id])
   @@map("leave_balances")
+}
+
+model Permission {
+  id          Int      @id @default(autoincrement())
+  role        UserRole
+  permissions Json
+
+  @@map("permissions")
 }
 
 enum UserRole {
@@ -328,4 +336,10 @@ enum HolidayType {
   company
   regional
   religious
+}
+
+enum EmploymentStatus {
+  active
+  notice_period
+  resigned
 }

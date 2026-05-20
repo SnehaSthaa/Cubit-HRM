@@ -4,7 +4,7 @@ export const createHolidaySchema = z
     name: z.string().min(1, "Holiday Name is required"),
     start_date: z.string().min(1, "Start Date is required"),
     end_date: z.string().min(1, "End Date is required"),
-    type: z.string().min(1, "Holiday's Type is Required"),
+    holiday_type: z.string().min(1, "Holiday's Type is Required"),
   })
   .refine(
     (data) => {
@@ -19,5 +19,5 @@ export const updateHolidaySchema = z.object({
   name: z.string().optional(),
   start_date: z.string().optional(),
   end_date: z.string().optional(),
-  type: z.string().optional(),
+  holiday_type: z.string().optional(),
 });

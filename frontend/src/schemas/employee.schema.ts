@@ -18,7 +18,7 @@ export const employeeSchema = z.object({
   date_of_birth: z.string(),
   salary: z.number().min(0, "Salary must be positive").optional(),
   contract_type: z.string().optional(),
-  employment_status: z.string().optional(),
+  employment_status: z.enum(["active", "notice_period", "resigned"]).optional(),
   level: z.string().optional(),
   hierarchy: z.string().optional(),
   previous_experience: z.string().optional(),
@@ -40,6 +40,9 @@ export const employeeSchema = z.object({
   pan_number: z.string().optional(),
   nid_number: z.string().optional(),
   ssid_number: z.string().optional(),
+  account_number: z.string().optional(),
+  bank_name: z.string().optional(),
+  branch: z.string().optional(),
 
   // Manager
   manager_id: z.string().optional(),

@@ -65,6 +65,13 @@ export type TakeHomeRequestApi = {
     } | null;
   };
 };
+export interface ProRataDebugResult {
+  joining_date: string;
+  annual_quota: number;
+  accrual_starts: string;
+  this_year: { month: string; accrued: number }[];
+  next_year_jan1: { month: string; accrued: number };
+}
 export interface AssetApi {
   id: string;
   asset_id: string;
@@ -186,6 +193,7 @@ class ApiClient {
         email: string;
         name: string;
         role: "super_admin" | "hr_admin" | "employee";
+        permissions?: string[];
       };
       employee?: MeEmployee;
     }>(this.client.get("/users/me"));
@@ -287,6 +295,7 @@ class ApiClient {
       this.client.get<ApiResponse<LeaveBalance[]>>("/leaves/balance"),
     );
   }
+
   updateLeaveBalance(data: {
     employee_id: string;
     leave_type_id: string;
@@ -501,6 +510,26 @@ class ApiClient {
   reviewTakeHomeRequest(id: string, data: { status: "approved" | "rejected" }) {
     return this.parse(
       this.client.patch<ApiResponse>(`/assets/take-home-requests/${id}`, data),
+    );
+  }
+  //Offboarding
+  // Offboarding
+  getOffboardingEmployees() {
+    return this.parse<Employee[]>(
+      this.client.get<ApiResponse<Employee[]>>("/offboarding"),
+    );
+  }
+
+  startOffboarding(employeeId: string) {
+    return this.parse(
+      this.client.post<ApiResponse>(
+        `/offboarding/${employeeId}/start-offboarding`,
+      ),
+    );
+  }
+  completeOffboarding(employeeId: string) {
+    return this.parse(
+      this.client.patch<ApiResponse>(`/offboarding/${employeeId}/complete`),
     );
   }
 }

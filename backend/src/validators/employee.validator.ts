@@ -13,7 +13,7 @@ export const createEmployeeSchema = z.object({
     .string()
     .min(1, "Phone is required")
     .regex(/^\d{10}$/, "Phone must be exactly 10 digits"),
-  salary: z.number().optional(),
+
   manager_id: z.string().optional(),
 });
 export const updateEmployeeSchema = z
@@ -23,5 +23,44 @@ export const updateEmployeeSchema = z
     email: z.string().email().optional(),
     department: z.string().optional(),
     phone: z.string().optional(),
+
+    current_address: z.string().optional(),
+    permanent_address: z.string().optional(),
+    city: z.string().optional(),
+    state: z.string().optional(),
+    postal_code: z.string().optional(),
+    salary: z.preprocess(
+      (val) => (val === "" || val === null ? undefined : Number(val)),
+      z.number().min(0).optional(),
+    ),
+
+    citizenship_number: z.string().optional(),
+    pan_number: z.string().optional(),
+    nid_number: z.string().optional(),
+    ssid_number: z.string().optional(),
+
+    manager_id: z.string().optional(),
+
+    date_of_birth: z.string().optional(),
+
+    contract_type: z.string().optional(),
+
+    employment_status: z
+      .enum(["active", "notice_period", "resigned"])
+      .optional(),
+
+    level: z.string().optional(),
+    hierarchy: z.string().optional(),
+    previous_experience: z.string().optional(),
+
+    marital_status: z
+      .enum(["Single", "Married", "Divorced", "Widowed"])
+      .optional(),
+    gender: z.enum(["Male", "Female", "Others"]).optional(),
+
+    position: z.string().optional(),
+    account_number: z.string().optional(),
+    bank_name: z.string().optional(),
+    branch: z.string().optional(),
   })
   .partial();

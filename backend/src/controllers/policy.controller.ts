@@ -125,19 +125,17 @@ export class LeavePolicyController {
     try {
       const { id } = req.params;
 
-      await prisma.leavePolicy.delete({
-        where: { id },
-      });
+      await prisma.leavePolicy.delete({ where: { id } });
 
-      res.json({
-        success: true,
-        message: "Leave policy deleted successfully",
-      });
+      res.json({ success: true, message: "Leave policy deleted successfully" });
     } catch (error: any) {
-      res.status(500).json({
-        success: false,
-        message: error.message,
-      });
+      if (error.code === "P2025") {
+        return res.status(404).json({
+          success: false,
+          message: "Leave policy not found",
+        });
+      }
+      res.status(500).json({ success: false, message: error.message });
     }
   }
 }

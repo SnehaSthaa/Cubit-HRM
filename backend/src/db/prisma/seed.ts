@@ -46,7 +46,7 @@ async function main() {
       email: "admin@harmonyhr.com",
       department: "Management",
       joining_date: new Date(),
-      employment_status: "Active",
+      employment_status: "active",
       employment_type: "Full-time",
     },
   });

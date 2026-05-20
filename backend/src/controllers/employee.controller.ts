@@ -6,6 +6,7 @@ import { ApiResponse, Employee } from "../types/index.js";
 import { minioClient, MINIO_BASE_URL, ensureBucket } from "@/utils/minio.js";
 import { sendWelcomeEmail } from "@/utils/mailer.js";
 import { generateRandomPassword } from "@/utils/generatePassword.js";
+import { EmploymentStatus } from "@prisma/client";
 const EMPLOYEE_FILES_BUCKET = "employee-files";
 
 export class EmployeeController {
@@ -157,7 +158,8 @@ export class EmployeeController {
           ...(employeeData.level && { level: employeeData.level }),
           ...(employeeData.hierarchy && { hierarchy: employeeData.hierarchy }),
           ...(employeeData.employment_status && {
-            employment_status: employeeData.employment_status,
+            employment_status:
+              employeeData.employment_status as EmploymentStatus,
           }),
           ...(employeeData.citizenship_number && {
             citizenship_number: employeeData.citizenship_number,
@@ -369,7 +371,6 @@ export class EmployeeController {
       });
     }
   }
-  // Replace the uploadProfileImage method in EmployeeController with this:
 
   static async uploadProfileImage(req: Request, res: Response) {
     try {
@@ -415,6 +416,47 @@ export class EmployeeController {
       });
     } catch (error: any) {
       return res.status(500).json({ success: false, message: error.message });
+    }
+  }
+
+  static async startOffboarding(req: Request, res: Response<ApiResponse>) {
+    try {
+      const { id } = req.params;
+
+      const employee = await prisma.employee.findUnique({ where: { id } });
+
+      if (!employee) {
+        return res.status(404).json({
+          success: false,
+          message: "Employee not found",
+        });
+      }
+
+      if (employee.employment_status !== EmploymentStatus.active) {
+        return res.status(400).json({
+          success: false,
+          message: "Only active employees can be offboarded",
+        });
+      }
+
+      const updated = await prisma.employee.update({
+        where: { id },
+        data: {
+          employment_status: EmploymentStatus.notice_period,
+          employee_verified: false,
+        },
+      });
+
+      return res.json({
+        success: true,
+        message: "Employee moved to notice period",
+        data: updated,
+      });
+    } catch (error: any) {
+      return res.status(400).json({
+        success: false,
+        message: error.message,
+      });
     }
   }
 }
