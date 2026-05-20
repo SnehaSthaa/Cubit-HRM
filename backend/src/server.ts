@@ -9,11 +9,9 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { syncRouter } from "./services/sync.service";
 
-// Cron & Sync Imports
 import { setupCronJobs } from "./CRON/index.js";
 import { runAttendanceSync } from "./CRON/syncTask.js";
 
-// Routes & Middleware
 import routes from "./routes/index.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { AppError } from "./utils/appError.js";
@@ -22,7 +20,6 @@ import { ensureBucket } from "./utils/minio.js";
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// 1. Initialize Path helpers
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const frontendDist = path.join(__dirname, "..", "frontend", "dist");

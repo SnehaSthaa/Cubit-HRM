@@ -7,9 +7,12 @@ import { ApiResponse } from "../types/index.js";
 
 const MANUAL_DEVICE_SERIAL = "MANUAL";
 
-// Late threshold: 09:30 local time
-const LATE_THRESHOLD_HOUR = 9;
-const LATE_THRESHOLD_MINUTE = 30;
+// Nepal is UTC+5:45
+const NEPAL_OFFSET_MS = (5 * 60 + 45) * 60 * 1000;
+
+// Late threshold in Nepal local time: 09:30
+const LATE_THRESHOLD_NEPAL_HOUR = 9;
+const LATE_THRESHOLD_NEPAL_MINUTE = 30;
 
 // ── Shared includes ──────────────────────────────────────────────────────────
 
@@ -41,45 +44,89 @@ const fullAttendanceInclude = {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function todayMidnight(): Date {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
-
-function parseTimeString(t: string): Date {
-  return new Date(`1970-01-01T${t}`);
-}
-
 /**
- * FIX: Consistent local-time based check using local hours/minutes directly,
- * instead of mixing local getHours() with Date.UTC() which was confusing.
- * Returns a 1970-epoch Date representing the current local time (for DB storage).
+ * Returns the Nepal-midnight anchor as a fake-UTC Date.
+ *
+ * "Fake-UTC" means the Date object's UTC fields hold Nepal local values.
+ * This matches how the ZKTeco device stores punches: it sends Nepal local
+ * time stamped with "Z", so Prisma stores it with those exact digits.
+ *
+ * e.g. Nepal local 2026-05-19 02:15 → returns 2026-05-19T00:00:00.000Z
+ *
+ * We derive today's Nepal calendar date by adding the offset to wall-clock
+ * UTC, then construct a Date whose UTC fields equal that Nepal date at 00:00.
  */
-function currentTimeAs1970(): Date {
-  const now = new Date();
+function todayMidnight(): Date {
+  const realUtcNow = new Date();
+  const nepalNow = new Date(realUtcNow.getTime() + NEPAL_OFFSET_MS);
+  // Build a fake-UTC Date: UTC fields = Nepal calendar date, time = 00:00
   return new Date(
-    Date.UTC(1970, 0, 1, now.getHours(), now.getMinutes(), now.getSeconds()),
+    Date.UTC(
+      nepalNow.getUTCFullYear(),
+      nepalNow.getUTCMonth(),
+      nepalNow.getUTCDate(),
+    ),
   );
 }
 
 /**
- * FIX: Late check now uses local time directly instead of comparing
- * against a UTC-anchored threshold with local hours stuffed into UTC.
+ * Converts an "HH:MM" or "HH:MM:SS" Nepal local time string into a
+ * fake-UTC Date for DB storage.
+ *
+ * Storage convention (matching ZKTeco device behaviour):
+ *   The UTC digits of the stored Date ARE the Nepal local time.
+ *   i.e. stored = "YYYY-MM-DDThh:mm:ssZ" where hh:mm:ss is Nepal local.
+ *
+ * dateContext must be the fake-UTC midnight for the record's Nepal calendar
+ * date (from todayMidnight() or the existing record's .date field).
+ *
+ * Example: hhmm = "09:30", dateContext = 2026-05-18T00:00:00.000Z
+ *   → stored = 2026-05-18T09:30:00.000Z  (UTC digits = 09:30 NPT) ✅
+ *   Frontend reads UTC digits directly → displays "09:30" ✅
+ *
+ * NOTE: We do NOT subtract NEPAL_OFFSET_MS here. The device never does,
+ * and we must be consistent with how device punches are stored.
+ */
+function parseTimeString(hhmm: string, dateContext: Date): Date {
+  const normalized = hhmm.length === 5 ? `${hhmm}:00` : hhmm;
+  const [h, m, s] = normalized.split(":").map(Number);
+  // dateContext.getTime() is already the fake-UTC Nepal midnight in ms.
+  // Add hours/minutes/seconds directly — no offset subtraction.
+  return new Date(
+    dateContext.getTime() + h * 3_600_000 + m * 60_000 + (s ?? 0) * 1_000,
+  );
+}
+
+/**
+ * Returns the current Nepal local time as a fake-UTC Date.
+ * Used for self check-in / check-out timestamps so they are stored with
+ * Nepal local digits, consistent with ZKTeco device punches.
+ *
+ * real UTC now → add NEPAL_OFFSET_MS → the Nepal local instant.
+ * We then store that value as-is (its UTC fields = Nepal local time).
+ *
+ * Example: real UTC 03:45 NPT = 09:30 → stored as ...T09:30:00.000Z ✅
+ */
+function nowNepalFakeUtc(): Date {
+  return new Date(Date.now() + NEPAL_OFFSET_MS);
+}
+
+/**
+ * Late check: is the current Nepal local time past 09:30?
  */
 function isLate(): boolean {
-  const now = new Date();
-  const h = now.getHours();
-  const m = now.getMinutes();
+  const nepalNow = new Date(Date.now() + NEPAL_OFFSET_MS);
+  const h = nepalNow.getUTCHours();
+  const m = nepalNow.getUTCMinutes();
   return (
-    h > LATE_THRESHOLD_HOUR ||
-    (h === LATE_THRESHOLD_HOUR && m > LATE_THRESHOLD_MINUTE)
+    h > LATE_THRESHOLD_NEPAL_HOUR ||
+    (h === LATE_THRESHOLD_NEPAL_HOUR && m > LATE_THRESHOLD_NEPAL_MINUTE)
   );
 }
 
 /**
- * Ensures a sentinel "MANUAL" device exists for HR/admin manual entries
- * AND for web/app based self check-in (no physical biometric device).
+ * Ensures a sentinel "MANUAL" device exists for web/app self check-in
+ * and HR manual entries (no physical biometric device).
  */
 async function ensureManualDevice(): Promise<string> {
   const existing = await prisma.device.findUnique({
@@ -103,9 +150,7 @@ async function validateDevice(
   serial_number: string,
   res: Response<ApiResponse>,
 ) {
-  const device = await prisma.device.findUnique({
-    where: { serial_number },
-  });
+  const device = await prisma.device.findUnique({ where: { serial_number } });
   if (!device) {
     res.status(404).json({ success: false, message: "Device not found" });
     return null;
@@ -218,9 +263,11 @@ export class AttendanceController {
 
       const where: any = { employee_id };
       if (month && year) {
+        const y = parseInt(year);
+        const m = parseInt(month) - 1;
         where.date = {
-          gte: new Date(parseInt(year), parseInt(month) - 1, 1),
-          lte: new Date(parseInt(year), parseInt(month), 0),
+          gte: new Date(Date.UTC(y, m, 1)),
+          lte: new Date(Date.UTC(y, m + 1, 0, 23, 59, 59, 999)),
         };
       }
 
@@ -265,9 +312,11 @@ export class AttendanceController {
 
       const where: any = { employee_id };
       if (month && year) {
+        const y = parseInt(year);
+        const m = parseInt(month) - 1;
         where.date = {
-          gte: new Date(parseInt(year), parseInt(month) - 1, 1),
-          lte: new Date(parseInt(year), parseInt(month), 0),
+          gte: new Date(Date.UTC(y, m, 1)),
+          lte: new Date(Date.UTC(y, m + 1, 0, 23, 59, 59, 999)),
         };
       }
 
@@ -320,13 +369,15 @@ export class AttendanceController {
       }
 
       const deviceSerial = await ensureManualDevice();
+      // date from client is "YYYY-MM-DD" treated as fake-UTC Nepal midnight
+      const dateContext = new Date(date);
 
       const record = await prisma.attendance.create({
         data: {
           employee_id,
-          date: new Date(date),
-          check_in: check_in ? parseTimeString(check_in) : null,
-          check_out: check_out ? parseTimeString(check_out) : null,
+          date: dateContext,
+          check_in: check_in ? parseTimeString(check_in, dateContext) : null,
+          check_out: check_out ? parseTimeString(check_out, dateContext) : null,
           status: status as AttendanceStatus,
           notes: notes ?? null,
           deviceId: deviceSerial,
@@ -388,31 +439,40 @@ export class AttendanceController {
       const deviceSerial = await ensureManualDevice();
 
       const created = await prisma.$transaction(
-        records.map((r) =>
-          prisma.attendance.upsert({
+        records.map((r) => {
+          const dateContext = new Date(r.date);
+          return prisma.attendance.upsert({
             where: {
               employee_id_date: {
                 employee_id: r.employee_id,
-                date: new Date(r.date),
+                date: dateContext,
               },
             },
             update: {
-              check_in: r.check_in ? parseTimeString(r.check_in) : null,
-              check_out: r.check_out ? parseTimeString(r.check_out) : null,
+              check_in: r.check_in
+                ? parseTimeString(r.check_in, dateContext)
+                : null,
+              check_out: r.check_out
+                ? parseTimeString(r.check_out, dateContext)
+                : null,
               status: r.status,
               notes: r.notes ?? null,
             },
             create: {
               employee_id: r.employee_id,
-              date: new Date(r.date),
-              check_in: r.check_in ? parseTimeString(r.check_in) : null,
-              check_out: r.check_out ? parseTimeString(r.check_out) : null,
+              date: dateContext,
+              check_in: r.check_in
+                ? parseTimeString(r.check_in, dateContext)
+                : null,
+              check_out: r.check_out
+                ? parseTimeString(r.check_out, dateContext)
+                : null,
               status: r.status,
               notes: r.notes ?? null,
               deviceId: deviceSerial,
             },
-          }),
-        ),
+          });
+        }),
       );
 
       res.status(201).json({
@@ -438,16 +498,48 @@ export class AttendanceController {
           .json({ success: false, message: "Attendance record not found" });
       }
 
+      // existing.date is the fake-UTC midnight for this record's Nepal calendar date.
+      const dateContext = existing.date;
+
+      /**
+       * Resolve a check_in / check_out value from the PATCH body.
+       *
+       * The frontend sends one of:
+       *   • "HH:MM"              — user-edited time in Nepal local (from the time picker)
+       *   • null / undefined     — clear the field
+       *
+       * parseTimeString converts HH:MM → fake-UTC using the record's dateContext,
+       * which is exactly what device punches do, so display is consistent.
+       */
+      function resolveTime(
+        value: string | null | undefined,
+      ): Date | null | undefined {
+        if (value === undefined) return undefined; // field not sent → don't touch it
+        if (!value) return null; // explicit null → clear it
+        // Already a full ISO string? (shouldn't happen from the fixed frontend,
+        // but handle gracefully to avoid double-conversion if old clients call this)
+        if (value.includes("T")) {
+          // Re-express as fake-UTC: extract HH:MM from the ISO string and re-parse.
+          // The ISO string's UTC digits already equal Nepal local time (fake-UTC convention).
+          const d = new Date(value);
+          const hhmm = `${d.getUTCHours().toString().padStart(2, "0")}:${d.getUTCMinutes().toString().padStart(2, "0")}`;
+          return parseTimeString(hhmm, dateContext);
+        }
+        // Plain "HH:MM" from the frontend edit dialog
+        return parseTimeString(value, dateContext);
+      }
+
+      const checkInResolved = resolveTime(check_in);
+      const checkOutResolved = resolveTime(check_out);
+
       const updated = await prisma.attendance.update({
         where: { id },
         data: {
-          ...(check_in !== undefined && {
-            check_in: check_in ? parseTimeString(check_in) : null,
+          ...(checkInResolved !== undefined && { check_in: checkInResolved }),
+          ...(checkOutResolved !== undefined && {
+            check_out: checkOutResolved,
           }),
-          ...(check_out !== undefined && {
-            check_out: check_out ? parseTimeString(check_out) : null,
-          }),
-          ...(status && { status: status as AttendanceStatus }),
+          ...(status !== undefined && { status: status as AttendanceStatus }),
           ...(notes !== undefined && { notes }),
         },
         include: fullAttendanceInclude,
@@ -505,9 +597,7 @@ export class AttendanceController {
       }
 
       const records = await prisma.attendance.findMany({
-        where: {
-          date: { gte: new Date(from_date), lte: new Date(to_date) },
-        },
+        where: { date: { gte: new Date(from_date), lte: new Date(to_date) } },
         include: { employee: { include: employeeInclude } },
       });
 
@@ -566,25 +656,20 @@ export class AttendanceController {
         } as any);
       }
 
-      // FIX: Use isLate() which compares local hours directly,
-      // instead of the old approach that mixed local hours with Date.UTC()
-      const status: AttendanceStatus = isLate() ? "late" : "present";
-      const checkInTime = currentTimeAs1970();
+      const status = isLate() ? "late" : "present";
+      // Store check-in as fake-UTC (Nepal local digits) — consistent with device punches
+      const checkInTime = nowNepalFakeUtc();
 
       const { device_id } = req.body;
       let deviceSerial: string;
       let biometricId: string | null = null;
 
       if (device_id) {
-        // ── Biometric device check-in ──
         const device = await validateDevice(device_id, res);
         if (!device) return;
 
         const mapping = await prisma.deviceMapping.findFirst({
-          where: {
-            employee_id,
-            device: { serial_number: device_id },
-          },
+          where: { employee_id, device: { serial_number: device_id } },
         });
         if (!mapping) {
           return res.status(403).json({
@@ -596,7 +681,6 @@ export class AttendanceController {
         deviceSerial = device_id;
         biometricId = mapping.biometric_id;
       } else {
-        // ── Web / app check-in (no physical device) ──
         deviceSerial = await ensureManualDevice();
       }
 
@@ -606,7 +690,6 @@ export class AttendanceController {
           check_in: checkInTime,
           status,
           deviceId: deviceSerial,
-          // FIX: was "biomeric_id" (missing 't') — now correctly "biometric_id"
           ...(biometricId && { biometric_id: biometricId }),
         },
         create: {
@@ -615,7 +698,6 @@ export class AttendanceController {
           check_in: checkInTime,
           status,
           deviceId: deviceSerial,
-          // FIX: was "biomeric_id" (missing 't') — now correctly "biometric_id"
           ...(biometricId && { biometric_id: biometricId }),
         },
         include: fullAttendanceInclude,
@@ -663,13 +745,10 @@ export class AttendanceController {
         } as any);
       }
 
-      // FIX: Use the same currentTimeAs1970() helper used everywhere else,
-      // instead of the inconsistent `new Date(\`1970-01-01T${toTimeString()}\`)` pattern
-      const checkOutTime = currentTimeAs1970();
-
+      // Store check-out as fake-UTC (Nepal local digits) — consistent with device punches
       const updated = await prisma.attendance.update({
         where: { id: existing.id },
-        data: { check_out: checkOutTime },
+        data: { check_out: nowNepalFakeUtc() },
         include: fullAttendanceInclude,
       });
 

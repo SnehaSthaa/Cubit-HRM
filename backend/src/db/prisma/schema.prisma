@@ -148,8 +148,8 @@ model Attendance {
   created_at   DateTime         @default(now())
   updated_at   DateTime         @updatedAt
   deviceId     String?
-  check_in     DateTime?
-  check_out    DateTime?
+  check_in     DateTime?        @db.Timestamptz
+  check_out    DateTime?        @db.Timestamptz
   biometric_id String?
   device       Device?          @relation(fields: [deviceId], references: [serial_number])
   employee     Employee         @relation(fields: [employee_id], references: [id], onDelete: Cascade)

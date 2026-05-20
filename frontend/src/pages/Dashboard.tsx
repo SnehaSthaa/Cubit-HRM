@@ -80,7 +80,8 @@ export default function Dashboard() {
     try {
       setLoading(true);
 
-      const [employeesRes, leavesRes] = await Promise.all([        apiClient.getEmployees(),
+      const [employeesRes, leavesRes] = await Promise.all([
+        apiClient.getEmployees(),
         apiClient.getLeaves(),
       ]);
 

@@ -271,7 +271,7 @@ export default function EmployeeSelfService() {
   };
 
   // ── ADDED BACK: was accidentally removed ──────────────────────────────────
-  const handleSaveProfile = async () => {
+ const handleSaveProfile = async () => {
   if (!employee?.id) return;
   if (!profileForm.first_name || !profileForm.last_name || !profileForm.email) {
     toast({ title: "First name, last name and email are required", variant: "destructive" });
@@ -279,18 +279,62 @@ export default function EmployeeSelfService() {
   }
   try {
     setSaving(true);
-    // Use the dedicated personal-details endpoint, not updateEmployee
-await apiClient.updatePersonalDetails(employee.id, profileForm as unknown as Record<string, unknown>);    setEmployee((prev) =>
-      prev ? {
-        ...prev,
-        personal_details: {
-          ...prev.personal_details,
-          ...profileForm,
-          id: prev.personal_details?.id ?? "",
-          employee_id: employee.id,
-        },
-      } : prev
-    );
+
+    const clean = (v: string) => v.trim() || undefined;
+
+    const payload: Record<string, unknown> = {
+      first_name:         profileForm.first_name.trim(),
+      last_name:          profileForm.last_name.trim(),
+      email:              profileForm.email.trim(),
+      phone:              clean(profileForm.phone),
+      date_of_birth:      clean(profileForm.date_of_birth),
+      gender:             clean(profileForm.gender),
+      marital_status:     clean(profileForm.marital_status),
+      father_name:        clean(profileForm.father_name),
+      grandfather_name:   clean(profileForm.grandfather_name),
+      mother_name:        clean(profileForm.mother_name),
+      current_address:    clean(profileForm.current_address),
+      permanent_address:  clean(profileForm.permanent_address),
+      citizenship_number: clean(profileForm.citizenship_number),
+      pan_number:         clean(profileForm.pan_number),
+      nid_number:         clean(profileForm.nid_number),
+      ssid_number:        clean(profileForm.ssid_number),
+    };
+    Object.keys(payload).forEach((k) => payload[k] === undefined && delete payload[k]);
+
+    await apiClient.updatePersonalDetails(employee.id, payload);
+
+    // ── Re-fetch from server to confirm what was actually saved ──
+    try {
+      const refreshed = await apiClient.getEmployees();
+      const found = (refreshed.data ?? []).find(
+        (e: { id: string }) => e.id === employee.id
+      );
+      if (found) {
+        const normalized = normalizeEmployee(found);
+        setEmployee(normalized);
+        setProfileForm(profileFromEmployee(normalized));
+        // Also refresh bank/dept so they don't go stale
+        const bank = bankFromEmployee(normalized);
+        setBankCommitted(bank); setBankDraft(bank);
+        const dept = deptFromEmployee(normalized);
+        setDeptCommitted(dept); setDeptDraft(dept);
+      }
+    } catch {
+      // Re-fetch failed — at least keep the optimistic local state
+      setEmployee((prev) =>
+        prev ? {
+          ...prev,
+          personal_details: {
+            ...prev.personal_details,
+            ...profileForm,
+            id: prev.personal_details?.id ?? "",
+            employee_id: employee.id,
+          },
+        } : prev
+      );
+    }
+
     setEditing(false);
     markChanged("profile");
     toast({ title: "Profile updated", description: "Awaiting HR verification." });

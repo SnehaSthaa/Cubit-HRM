@@ -5,11 +5,7 @@ let isSyncing = false;
 
 const DEVICE_IP = "192.168.110.64";
 const DEVICE_PORT = 4370;
-
-function toNepalTime(date: Date): Date {
-  const nepalOffsetMs = (5 * 60 + 45) * 60 * 1000;
-  return new Date(date.getTime() + nepalOffsetMs);
-}
+const NEPAL_OFFSET_MS = (5 * 60 + 45) * 60 * 1000;
 
 export const runAttendanceSync = async () => {
   if (isSyncing) {
@@ -17,74 +13,131 @@ export const runAttendanceSync = async () => {
     return;
   }
 
+  const device = await prisma.device.findFirst({ where: { ip: DEVICE_IP } });
+  if (!device) {
+    console.error(`[SYNC] No device found for IP ${DEVICE_IP}.`);
+    return;
+  }
+
   const zk = new ZKLib(DEVICE_IP, DEVICE_PORT, 10000, 4000);
 
   try {
     isSyncing = true;
-    console.log("--- Connecting to Biometric Device ---");
     await zk.createSocket();
 
-    const device = await prisma.device.findFirst({
-      where: { ip: DEVICE_IP },
-    });
-
-    if (!device) {
-      console.error(
-        `[SYNC] No device found in DB for IP ${DEVICE_IP}. ` +
-          `Register it first via the Device Config panel, then retry.`,
-      );
-      return;
-    }
-
-    console.log(`[SYNC] Using device: ${device.device_name} (${device.id})`);
-
     const logs = await zk.getAttendances();
-    console.log(`[DEVICE] Found ${logs.data.length} total logs.`);
+    console.log(`[SYNC] ${logs.data.length} punch records fetched.`);
 
-    for (const log of logs.data) {
-      const rawTime = new Date(log.recordTime);
-      const punchTime = toNepalTime(rawTime);
+    // Sort ascending — ensures first punch processed first per employee-day
+    const sortedLogs = [...logs.data].sort(
+      (a, b) =>
+        (a.recordTime as Date).getTime() - (b.recordTime as Date).getTime(),
+    );
 
-      // Extract date components from the NPT-shifted time using UTC accessors
-      const year = punchTime.getUTCFullYear();
-      const month = String(punchTime.getUTCMonth() + 1).padStart(2, "0");
-      const day = String(punchTime.getUTCDate()).padStart(2, "0");
-      const punchDate = new Date(`${year}-${month}-${day}`);
+    // ── Group punches by employee + Nepal calendar date ──────────────────────
+    // Do this BEFORE hitting the DB so each employee-day is resolved once,
+    // not punch-by-punch (avoids the re-run overwrite bug).
+    type DayKey = string;
+    const groups = new Map<
+      DayKey,
+      {
+        employeeId: string;
+        biometricId: string;
+        date: Date;
+        punches: Date[];
+      }
+    >();
 
+    for (const log of sortedLogs) {
       const mapping = await prisma.deviceMapping.findFirst({
         where: { biometric_id: String(log.deviceUserId) },
       });
-
       if (!mapping) continue;
 
-      await prisma.attendance.upsert({
-        where: {
-          employee_id_date: {
-            employee_id: mapping.employee_id,
-            date: punchDate,
-          },
-        },
-        update: {
-          check_out: punchTime,
-        },
-        create: {
-          employee_id: mapping.employee_id,
+      const punchUTC = log.recordTime as Date;
+      const nepalMs = punchUTC.getTime() + NEPAL_OFFSET_MS;
+      const nepalDt = new Date(nepalMs);
+      const punchDate = new Date(
+        Date.UTC(
+          nepalDt.getUTCFullYear(),
+          nepalDt.getUTCMonth(),
+          nepalDt.getUTCDate(),
+        ),
+      );
+
+      const key: DayKey = `${mapping.employee_id}__${punchDate.toISOString()}`;
+      if (!groups.has(key)) {
+        groups.set(key, {
+          employeeId: mapping.employee_id,
+          biometricId: String(log.deviceUserId),
           date: punchDate,
-          check_in: punchTime,
-          status: "present",
-          biometric_id: String(log.deviceUserId),
-          deviceId: device.serial_number,
-        },
-      });
+          punches: [],
+        });
+      }
+      groups.get(key)!.punches.push(punchUTC);
     }
 
-    console.log("✅ Sync completed successfully.");
+    // ── Upsert one record per employee-day ───────────────────────────────────
+    for (const { employeeId, biometricId, date, punches } of groups.values()) {
+      // Already sorted, but sort within group to be safe
+      punches.sort((a, b) => a.getTime() - b.getTime());
+
+      const checkIn = punches[0];
+      const checkOut = punches.length > 1 ? punches[punches.length - 1] : null;
+
+      const nepalCheckIn = new Date(checkIn.getTime() + NEPAL_OFFSET_MS);
+      const h = nepalCheckIn.getUTCHours();
+      const m = nepalCheckIn.getUTCMinutes();
+      const isLate = h > 8 || (h === 8 && m > 0);
+
+      console.log(
+        `[SYNC] ${employeeId} | date: ${date.toISOString().slice(0, 10)}` +
+          ` | in: ${checkIn.toISOString()} (${h}:${String(m).padStart(2, "0")} NPT)` +
+          (checkOut ? ` | out: ${checkOut.toISOString()}` : " | no check-out"),
+      );
+
+      const existing = await prisma.attendance.findUnique({
+        where: { employee_id_date: { employee_id: employeeId, date } },
+      });
+
+      if (!existing) {
+        await prisma.attendance.create({
+          data: {
+            employee_id: employeeId,
+            date,
+            check_in: checkIn,
+            check_out: checkOut,
+            status: isLate ? "late" : "present",
+            biometric_id: biometricId,
+            deviceId: device.serial_number,
+          },
+        });
+      } else {
+        // On re-runs: only update check_out if the new last punch is later.
+        // Never overwrite check_in — it was correct from the first sync run.
+        const betterCheckOut =
+          checkOut &&
+          (!existing.check_out ||
+            checkOut.getTime() > existing.check_out.getTime())
+            ? checkOut
+            : undefined;
+
+        if (betterCheckOut !== undefined) {
+          await prisma.attendance.update({
+            where: { employee_id_date: { employee_id: employeeId, date } },
+            data: { check_out: betterCheckOut },
+          });
+        }
+      }
+    }
+
+    console.log("✅ Sync complete.");
   } catch (err: any) {
     console.error("❌ Sync failed:", err.message);
   } finally {
     try {
       await zk.disconnect();
-    } catch (e) {}
+    } catch (_) {}
     isSyncing = false;
   }
 };
