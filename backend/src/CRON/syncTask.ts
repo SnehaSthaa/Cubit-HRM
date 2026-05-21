@@ -19,14 +19,13 @@ export const runAttendanceSync = async () => {
     return;
   }
 
-  const zk = new ZKLib(DEVICE_IP, DEVICE_PORT, 10000, 4000);
+  const zk = new ZKLib(DEVICE_IP, DEVICE_PORT, 200000, 4000, 0, "tcp");
 
   try {
     isSyncing = true;
     await zk.createSocket();
 
     const logs = await zk.getAttendances();
-    console.log(`[SYNC] ${logs.data.length} punch records fetched.`);
 
     // Sort ascending — ensures first punch processed first per employee-day
     const sortedLogs = [...logs.data].sort(

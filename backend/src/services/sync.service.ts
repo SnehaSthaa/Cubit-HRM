@@ -5,7 +5,8 @@ import { authenticate } from "../middleware/auth.js";
 
 export const syncRouter = Router();
 
-let isSyncing = false;
+// ── Shared across scheduler + HTTP so they don't conflict ────────────────────
+export let isSyncing = false;
 
 const DEVICE_IP = "192.168.110.64";
 const DEVICE_PORT = 4370;
@@ -55,7 +56,7 @@ syncRouter.post(
     res.setHeader("X-Accel-Buffering", "no");
     res.flushHeaders();
 
-    const zk = new ZKLib(DEVICE_IP, DEVICE_PORT, 10000, 4000);
+    const zk = new ZKLib(DEVICE_IP, DEVICE_PORT, 200000, 4000, 0, "tcp");
     isSyncing = true;
 
     try {
@@ -71,7 +72,6 @@ syncRouter.post(
         msg: "Socket open",
         detail: `${DEVICE_IP}:${DEVICE_PORT}`,
       });
-      send(res, "progress", { pct: 15, label: "Fetching attendance logs…" });
 
       const device = await prisma.device.findFirst({
         where: { ip: DEVICE_IP },
@@ -85,31 +85,50 @@ syncRouter.post(
         return;
       }
 
-      const logs = await zk.getAttendances();
+      send(res, "progress", { pct: 15, label: "Fetching attendance logs…" });
+
+      // ── Fetch with progress ──────────────────────────────────────────────────
+      const logs = await zk.getAttendances(
+        (received: number, total: number) => {
+          const pct = total > 0 ? Math.round(15 + (received / total) * 15) : 15;
+          send(res, "progress", {
+            pct,
+            label: `Downloading… ${received}/${total}`,
+          });
+        },
+      );
+
+      if (logs.err) throw new Error(`Device error: ${logs.err}`);
+
       const total = logs.data.length;
       send(res, "log", { type: "info", msg: `Fetched ${total} punch records` });
       send(res, "stats", { total, saved: 0, skipped: 0 });
 
-      // ✅ Sort chronologically
+      // ── Sort chronologically ─────────────────────────────────────────────────
       const sortedLogs = [...logs.data].sort(
         (a, b) =>
           new Date(a.recordTime).getTime() - new Date(b.recordTime).getTime(),
       );
 
-      let saved = 0;
+      // ── GROUP by employee+date FIRST (fixes the re-run overwrite bug) ────────
+      type DayKey = string;
+      const groups = new Map<
+        DayKey,
+        {
+          employeeId: string;
+          biometricId: string;
+          empName: string;
+          date: Date;
+          punches: Date[];
+        }
+      >();
+
       let skipped = 0;
 
       for (let i = 0; i < sortedLogs.length; i++) {
         const log = sortedLogs[i];
-
-        const pct = Math.round(20 + ((i + 1) / total) * 70);
-        send(res, "progress", {
-          pct,
-          label: `Processing ${i + 1} / ${total}…`,
-        });
-
-        const punchUTC = new Date(log.recordTime);
-        const punchDate = nepalDateMidnightUTC(punchUTC); // ✅ correct date
+        const pct = Math.round(30 + ((i + 1) / total) * 30);
+        send(res, "progress", { pct, label: `Grouping ${i + 1} / ${total}…` });
 
         const mapping = await prisma.deviceMapping.findFirst({
           where: { biometric_id: String(log.deviceUserId) },
@@ -122,80 +141,107 @@ syncRouter.post(
             type: "warn",
             msg: `No mapping for biometric ID ${log.deviceUserId} — skipped`,
           });
-          send(res, "punch", {
-            name: `Biometric ID ${log.deviceUserId}`,
-            time: log.recordTime,
-            action: "—",
-            status: "skip",
-          });
-          send(res, "stats", { total, saved, skipped });
+          send(res, "stats", { total, saved: 0, skipped });
           continue;
         }
 
+        const punchUTC = new Date(log.recordTime);
+        const punchDate = nepalDateMidnightUTC(punchUTC);
+        const key: DayKey = `${mapping.employee_id}__${punchDate.toISOString()}`;
         const empName = mapping.employee?.personal_details
           ? `${mapping.employee.personal_details.first_name} ${mapping.employee.personal_details.last_name}`
           : mapping.employee_id;
 
+        if (!groups.has(key)) {
+          groups.set(key, {
+            employeeId: mapping.employee_id,
+            biometricId: String(log.deviceUserId),
+            empName,
+            date: punchDate,
+            punches: [],
+          });
+        }
+        groups.get(key)!.punches.push(punchUTC);
+      }
+
+      // ── Upsert one record per employee-day ───────────────────────────────────
+      let saved = 0;
+      const groupList = [...groups.values()];
+
+      for (let i = 0; i < groupList.length; i++) {
+        const { employeeId, biometricId, empName, date, punches } =
+          groupList[i];
+        punches.sort((a, b) => a.getTime() - b.getTime());
+
+        const checkIn = punches[0];
+        const checkOut =
+          punches.length > 1 ? punches[punches.length - 1] : null;
+        const pct = Math.round(60 + ((i + 1) / groupList.length) * 38);
+        send(res, "progress", {
+          pct,
+          label: `Saving ${i + 1} / ${groupList.length}…`,
+        });
+
         const existing = await prisma.attendance.findUnique({
-          where: {
-            employee_id_date: {
-              employee_id: mapping.employee_id,
-              date: punchDate,
-            },
-          },
+          where: { employee_id_date: { employee_id: employeeId, date } },
         });
 
         if (!existing) {
           await prisma.attendance.create({
             data: {
-              employee_id: mapping.employee_id,
-              date: punchDate,
-              check_in: punchUTC,
-              status: isLateArrival(punchUTC) ? "late" : "present",
-              biometric_id: String(log.deviceUserId),
+              employee_id: employeeId,
+              date,
+              check_in: checkIn,
+              check_out: checkOut,
+              status: isLateArrival(checkIn) ? "late" : "present",
+              biometric_id: biometricId,
               deviceId: device.serial_number,
             },
           });
           saved++;
           send(res, "log", {
             type: "ok",
-            msg: "Check-in saved",
-            detail: `${empName} @ ${punchUTC.toISOString()}`,
+            msg: "Attendance saved",
+            detail: `${empName} in: ${checkIn.toISOString()}${checkOut ? ` out: ${checkOut.toISOString()}` : ""}`,
           });
           send(res, "punch", {
             name: empName,
-            time: punchUTC.toISOString(),
+            time: checkIn.toISOString(),
             action: "check_in",
-            status: isLateArrival(punchUTC) ? "late" : "in",
-          });
-        } else if (!existing.check_out || punchUTC > existing.check_out) {
-          await prisma.attendance.update({
-            where: {
-              employee_id_date: {
-                employee_id: mapping.employee_id,
-                date: punchDate,
-              },
-            },
-            data: { check_out: punchUTC },
-          });
-          saved++;
-          send(res, "log", {
-            type: "ok",
-            msg: "Check-out updated",
-            detail: `${empName} @ ${punchUTC.toISOString()}`,
-          });
-          send(res, "punch", {
-            name: empName,
-            time: punchUTC.toISOString(),
-            action: "check_out",
-            status: "out",
+            status: isLateArrival(checkIn) ? "late" : "in",
           });
         } else {
-          send(res, "log", {
-            type: "info",
-            msg: "Duplicate punch ignored",
-            detail: empName,
-          });
+          // Never overwrite check_in — only update check_out if newer
+          const betterCheckOut =
+            checkOut &&
+            (!existing.check_out ||
+              checkOut.getTime() > existing.check_out.getTime())
+              ? checkOut
+              : null;
+          if (betterCheckOut) {
+            await prisma.attendance.update({
+              where: { employee_id_date: { employee_id: employeeId, date } },
+              data: { check_out: betterCheckOut },
+            });
+            saved++;
+            send(res, "log", {
+              type: "ok",
+              msg: "Check-out updated",
+              detail: `${empName} @ ${betterCheckOut.toISOString()}`,
+            });
+            send(res, "punch", {
+              name: empName,
+              time: betterCheckOut.toISOString(),
+              action: "check_out",
+              status: "out",
+            });
+          } else {
+            send(res, "log", {
+              type: "info",
+              msg: "Already up to date",
+              detail: empName,
+            });
+          }
         }
 
         send(res, "stats", { total, saved, skipped });

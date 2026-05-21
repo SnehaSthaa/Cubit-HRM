@@ -4,13 +4,9 @@ import { prisma } from "../db/prisma.js";
 import { ApiResponse } from "../types/index.js";
 import net from "net";
 
-// ── ZKTeco ADMS constants ────────────────────────────────────────────────────
-
 const ZK_DEFAULT_PORT = 4370;
 const ZK_TIMEOUT_MS = 3000;
 const MANUAL_DEVICE_SERIAL = "MANUAL";
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
 
 function pingDevice(ip: string, port = ZK_DEFAULT_PORT): Promise<boolean> {
   return new Promise((resolve) => {
@@ -32,9 +28,6 @@ function pingDevice(ip: string, port = ZK_DEFAULT_PORT): Promise<boolean> {
   });
 }
 
-/**
- * Shared employee include used across all device mapping responses.
- */
 const mappingInclude = {
   employee: {
     include: {
@@ -50,8 +43,6 @@ const mappingInclude = {
   },
 } as const;
 
-// ── Controller ───────────────────────────────────────────────────────────────
-
 export class DeviceController {
   // ── GET /devices ──────────────────────────────────────────────────────
   static async getAll(_req: Request, res: Response<ApiResponse>) {
@@ -61,7 +52,6 @@ export class DeviceController {
         orderBy: { created_at: "desc" },
       });
 
-      // Ping all devices in parallel
       const devicesWithStatus = await Promise.all(
         devices.map(async (device) => ({
           ...device,
@@ -120,7 +110,6 @@ export class DeviceController {
         });
       }
 
-      // Block creating over the sentinel device serial
       if (serial_number === MANUAL_DEVICE_SERIAL) {
         return res.status(400).json({
           success: false,
@@ -128,7 +117,6 @@ export class DeviceController {
         });
       }
 
-      // Check uniqueness before hitting the DB constraint for cleaner errors
       const [existingIp, existingSerial] = await Promise.all([
         prisma.device.findUnique({ where: { ip } }),
         prisma.device.findUnique({ where: { serial_number } }),
@@ -190,7 +178,6 @@ export class DeviceController {
           .json({ success: false, message: "Device not found" });
       }
 
-      // Block renaming to the sentinel serial
       if (serial_number === MANUAL_DEVICE_SERIAL) {
         return res.status(400).json({
           success: false,
@@ -198,7 +185,6 @@ export class DeviceController {
         });
       }
 
-      // Check uniqueness conflicts in parallel
       const [ipConflict, serialConflict] = await Promise.all([
         ip && ip !== existing.ip
           ? prisma.device.findUnique({ where: { ip } })
@@ -251,7 +237,6 @@ export class DeviceController {
           .json({ success: false, message: "Device not found" });
       }
 
-      // Block deleting the sentinel device — it is relied on by HR manual entries
       if (existing.serial_number === MANUAL_DEVICE_SERIAL) {
         return res.status(400).json({
           success: false,
@@ -301,9 +286,6 @@ export class DeviceController {
   }
 
   // ── POST /devices/:id/sync ────────────────────────────────────────────
-  // ZKTeco K40 uses ADMS push — the device POSTs punches to /adms/iclock/cdata.
-  // This endpoint audits today's mapped employees vs actual attendance records
-  // and back-fills "absent" for anyone with no record yet.
   static async sync(req: Request, res: Response<ApiResponse>) {
     try {
       const { id } = req.params;
@@ -345,18 +327,12 @@ export class DeviceController {
 
       const employeeIds = mappings.map((m) => m.employee_id);
 
-      // Fetch existing attendance for all mapped employees in one query
       const existingRecords = await prisma.attendance.findMany({
-        where: {
-          employee_id: { in: employeeIds },
-          date: today,
-        },
+        where: { employee_id: { in: employeeIds }, date: today },
         select: { employee_id: true },
       });
 
       const attendedSet = new Set(existingRecords.map((r) => r.employee_id));
-
-      // Employees with no attendance record yet → mark absent
       const absentEmployeeIds = employeeIds.filter(
         (eid) => !attendedSet.has(eid),
       );
@@ -364,7 +340,6 @@ export class DeviceController {
       let absent_marked = 0;
 
       if (absentEmployeeIds.length > 0) {
-        // createMany skips duplicates safely with skipDuplicates
         const result = await prisma.attendance.createMany({
           data: absentEmployeeIds.map((employee_id) => ({
             employee_id,
@@ -377,7 +352,6 @@ export class DeviceController {
         absent_marked = result.count;
       }
 
-      // Touch the device's updatedAt timestamp
       await prisma.device.update({
         where: { id },
         data: { updated_at: new Date() },
@@ -428,7 +402,7 @@ export class DeviceController {
     }
   }
 
-  // ── GET /devices/mappings ─────────────────────────────────────────────
+  // ── GET /devices/mappings/all ─────────────────────────────────────────
   static async getAllMappings(_req: Request, res: Response<ApiResponse>) {
     try {
       const mappings = await prisma.deviceMapping.findMany({
@@ -501,16 +475,37 @@ export class DeviceController {
     try {
       const { id } = req.params;
 
-      const existing = await prisma.deviceMapping.findUnique({ where: { id } });
+      const existing = await prisma.deviceMapping.findUnique({
+        where: { id },
+      });
+
       if (!existing) {
         return res
           .status(404)
           .json({ success: false, message: "Mapping not found" });
       }
 
-      await prisma.deviceMapping.delete({ where: { id } });
-      res.json({ success: true, message: "Mapping removed" });
+      // Atomically delete all attendance records + the mapping
+      const [deleted] = await prisma.$transaction([
+        prisma.attendance.deleteMany({
+          where: { employee_id: existing.employee_id },
+        }),
+        prisma.deviceMapping.delete({
+          where: { id },
+        }),
+      ]);
+
+      console.log(
+        `[removeMapping] employee_id: ${existing.employee_id} | attendance deleted: ${deleted.count}`,
+      );
+
+      res.json({
+        success: true,
+        message: "Mapping and all attendance records removed",
+        data: { attendance_records_deleted: deleted.count },
+      });
     } catch (error: any) {
+      console.error("[removeMapping] Error:", error);
       if (error.code === "P2025") {
         return res
           .status(404)

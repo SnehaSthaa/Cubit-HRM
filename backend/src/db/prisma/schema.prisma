@@ -178,7 +178,7 @@ model DeviceMapping {
   id           String   @id @default(uuid()) @db.Uuid
   employee_id  String   @db.Uuid
   device_id    String   @db.Uuid
-  biometric_id String
+  biometric_id String   @unique
   created_at   DateTime @default(now())
   updated_at   DateTime @updatedAt
   device       Device   @relation(fields: [device_id], references: [id], onDelete: Cascade)

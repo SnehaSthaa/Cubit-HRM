@@ -61,6 +61,12 @@ router.delete(
   DeviceController.delete,
 );
 
+router.get(
+  "/:id/ping",
+  hasRequiredPermission([DeviceAction.View]),
+  DeviceController.ping,
+);
+
 router.post(
   "/:id/ping",
   hasRequiredPermission([DeviceAction.View]),
