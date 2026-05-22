@@ -14,8 +14,6 @@ const SHIFT_START_NEPAL_MINUTE = 0;
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 3000;
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function nepalDateMidnightUTC(punchUTC: Date): Date {
@@ -45,8 +43,6 @@ async function fetchAllLogs(onProgress: (msg: string) => void): Promise<any[]> {
     try {
       onProgress(`Connecting to device (attempt ${attempt}/${MAX_RETRIES})…`);
       await zk.createSocket();
-
-      // Freeze the device buffer so new punches don't corrupt the read
       try {
         await (zk as any).disableDevice();
       } catch (_) {}
@@ -91,14 +87,10 @@ async function fetchAllLogs(onProgress: (msg: string) => void): Promise<any[]> {
   );
 }
 
-// ── Route ─────────────────────────────────────────────────────────────────────
-
 syncRouter.get("/attendance/sync", async (req: Request, res: Response) => {
-  // 🌟 BYPASS CHECK: If you visit /api/attendance/sync?bypass=true, it skips everything else!
   const isBypass = req.query.bypass === "true";
 
   if (!isBypass) {
-    // If someone doesn't pass the flag, you can fall back to regular logic or just let it through
     console.log("[SYNC] Running with bypass flag or open access.");
   }
 
@@ -113,7 +105,6 @@ syncRouter.get("/attendance/sync", async (req: Request, res: Response) => {
   try {
     console.log("[SYNC START] Starting biometric data sync processing...");
 
-    // 1. Verify Device exists in database
     const device = await prisma.device.findFirst({
       where: { ip: DEVICE_IP },
     });
@@ -125,16 +116,13 @@ syncRouter.get("/attendance/sync", async (req: Request, res: Response) => {
       });
     }
 
-    // 2. Fetch raw logs from the device hardware
     const rawLogs = await fetchAllLogs((msg) => console.log(`[ZKLib] ${msg}`));
 
-    // Sort records NEWEST first so modern entries are parsed immediately
     const sortedLogs = [...rawLogs].sort(
       (a, b) =>
         new Date(b.recordTime).getTime() - new Date(a.recordTime).getTime(),
     );
 
-    // 3. Pre-load Mappings to prevent heavy nested loops
     const allMappings = await prisma.deviceMapping.findMany({
       include: { employee: { include: { personal_details: true } } },
     });
@@ -142,7 +130,6 @@ syncRouter.get("/attendance/sync", async (req: Request, res: Response) => {
       allMappings.map((m) => [m.biometric_id, m]),
     );
 
-    // 4. Group punches by employee + localized Nepal date
     type DayKey = string;
     const groups = new Map<
       DayKey,
@@ -183,7 +170,6 @@ syncRouter.get("/attendance/sync", async (req: Request, res: Response) => {
       groups.get(key)!.punches.push(punchUTC);
     }
 
-    // 5. Bulk query existing attendance data
     const employeeIds = [
       ...new Set([...groups.values()].map((g) => g.employeeId)),
     ];
@@ -197,7 +183,6 @@ syncRouter.get("/attendance/sync", async (req: Request, res: Response) => {
       ]),
     );
 
-    // 6. Process and Upsert database logs
     let saved = 0;
     let upToDateCount = 0;
     const groupList = [...groups.values()];

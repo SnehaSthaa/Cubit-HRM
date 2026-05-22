@@ -18,7 +18,6 @@ export const updatePersonalDetailSchema = z.object({
   first_name: z.string().trim().min(1).optional(),
   last_name: z.string().trim().min(1).optional(),
   email: z.string().email().optional(),
-  // Transform null/empty string to undefined to satisfy Prisma Update types
   phone: z.preprocess(
     (val) => (val === "" || val === null ? undefined : val),
     z.string().optional(),
@@ -65,7 +64,6 @@ export const updatePersonalDetailSchema = z.object({
   tole: z.string().optional(),
 });
 
-// 🌟 THE FIX: Inferred Type Exported for Form Components
 export type UpdatePersonalDetailInput = z.infer<
   typeof updatePersonalDetailSchema
 >;
