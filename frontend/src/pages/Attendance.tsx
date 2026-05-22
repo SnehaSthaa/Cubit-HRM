@@ -657,7 +657,25 @@ export default function Attendance() {
   }, [activeTab, selectedMonth, selectedYear, fetchMonthlySummary, isHR, myEmployeeId]);
 
   const handleSync = async () => {
-    setSyncing(true);
+  setSyncing(true);
+  try {
+    // 1. Trigger the ZKTeco device sync
+    const syncRes = await fetch(`${API_BASE}/attendance/sync`, {
+      headers: authHeaders(),
+    });
+
+    const syncJson = await syncRes.json();
+
+    if (!syncRes.ok || !syncJson.success) {
+      throw new Error(syncJson.message ?? "Device sync failed");
+    }
+
+    toast({
+      title: "Device sync complete",
+      description: `${syncJson.data.recordsSavedOrUpdated} records saved · ${syncJson.data.unmappedLogsSkipped} skipped`,
+    });
+
+    // 2. Now refresh all UI data with the newly synced records
     await Promise.all([
       fetchDailyLog(),
       fetchMyAttendance(),
@@ -665,9 +683,17 @@ export default function Attendance() {
       fetchMappings(),
       fetchUnmappedEmployees(),
     ]);
+
+  } catch (err: unknown) {
+    toast({
+      title: "Sync failed",
+      description: (err as Error).message,
+      variant: "destructive",
+    });
+  } finally {
     setSyncing(false);
-    toast({ title: "Sync complete", description: "Pulled latest attendance records." });
-  };
+  }
+};
 
   const handleAddDevice = async () => {
     if (!newDevice.name || !newDevice.ip || !newDevice.serial_number) {
@@ -1329,7 +1355,7 @@ export default function Attendance() {
                   <div className="h-5 w-px bg-border" />
                   <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                     <Clock className="w-3.5 h-3.5" />
-                    <span className="font-mono-data">Shift: 09:00 — 17:00</span>
+                    <span className="font-mono-data">Shift: 08:00 — 16:00</span>
                   </div>
                 </div>
               </div>
