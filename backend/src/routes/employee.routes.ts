@@ -70,7 +70,7 @@ router.patch(
 
 router.delete(
   "/:id",
-  authorize("super_admin"),
+  authorize("super_admin", "hr_admin"),
   hasRequiredPermission([EmployeesAction.Delete]),
   EmployeeController.delete,
 );

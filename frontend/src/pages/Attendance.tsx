@@ -74,7 +74,6 @@ interface AttendanceRecord {
       last_name: string;
       email: string;
     };
-    // support both array and string forms
     department?:
       | Array<{ department_name: string } | { name: string }>
       | string
@@ -239,7 +238,6 @@ function diffHours(inT: string, outT: string): string {
   return `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, "0")}m`;
 }
 
-// ── Convert Nepal HH:MM + date string → UTC ISO for DB storage ──
 function nepalHHMMtoUTCIso(dateStr: string, hhmm: string): string {
   const [h, m] = hhmm.split(":").map(Number);
   const totalMinutesNPT = h * 60 + m;
@@ -267,32 +265,21 @@ function getEmployeeName(record: AttendanceRecord): string {
   return record.employee_id;
 }
 
-// ── Defensive department extractor — handles all API shapes ──
 function getDepartment(record: AttendanceRecord): string {
   const emp = record.employee;
   if (!emp) return "—";
-
-  // Try employee.department in all known shapes
   const dept = emp.department ?? emp.departments;
-
   if (!dept) return "—";
-
-  // Plain string: "Engineering"
   if (typeof dept === "string") return dept || "—";
-
-  // Array: [{ department_name: "..." }] or [{ name: "..." }]
   if (Array.isArray(dept)) {
     const first = dept[0] as Record<string, string> | undefined;
     if (!first) return "—";
     return first.department_name ?? first.name ?? "—";
   }
-
-  // Single object: { department_name: "..." } or { name: "..." }
   if (typeof dept === "object") {
     const d = dept as Record<string, string>;
     return d.department_name ?? d.name ?? "—";
   }
-
   return "—";
 }
 
@@ -304,7 +291,11 @@ function getTodayStr(): string {
   return `${y}-${m}-${d}`;
 }
 
-// ── Maps API record → table row; shows elapsed time for active sessions ──
+function shortId(id: string): string {
+  if (/^EMP-/i.test(id)) return id.toUpperCase();
+  return id.length > 12 ? id.slice(0, 8).toUpperCase() : id;
+}
+
 function mapRecordToRow(r: AttendanceRecord): DailyRow {
   const checkIn  = formatTime(r.check_in);
   const checkOut = formatTime(r.check_out);
@@ -313,7 +304,6 @@ function mapRecordToRow(r: AttendanceRecord): DailyRow {
   if (checkIn !== "—" && checkOut !== "—") {
     hours = diffHours(checkIn, checkOut);
   } else if (checkIn !== "—" && r.check_in) {
-    // Still clocked in — show elapsed time from check-in ISO to now
     const diffMs   = Date.now() - new Date(r.check_in).getTime();
     const totalMin = Math.floor(diffMs / 60000);
     if (totalMin > 0) {
@@ -786,7 +776,6 @@ export default function Attendance() {
         method: "PATCH",
         headers: authHeaders(),
         body: JSON.stringify({
-          // Convert Nepal HH:MM → UTC ISO before sending to DB
           check_in:  editDraft.checkIn  ? nepalHHMMtoUTCIso(selectedDate, editDraft.checkIn)  : null,
           check_out: editDraft.checkOut ? nepalHHMMtoUTCIso(selectedDate, editDraft.checkOut) : null,
           status:    editDraft.status,
@@ -885,13 +874,11 @@ export default function Attendance() {
     }
   };
 
-  // ── HR approves/rejects a correction request ──
   const handleCorrectionAction = async (id: string, action: "approved" | "rejected") => {
     const editor  = getCurrentUser()?.name ?? "HR";
     const request = correctionRequests.find((r) => r.id === id);
     if (!request) return;
 
-    // Rejection: localStorage only, no API call needed
     if (action === "rejected") {
       const updated = correctionRequests.map((r) =>
         r.id === id ? { ...r, status: "rejected" as CorrectionRequestStatus, actionBy: editor } : r
@@ -902,10 +889,8 @@ export default function Attendance() {
       return;
     }
 
-    // Approval: apply to DB
     setApprovingId(id);
     try {
-      // 1. Look up existing attendance record for this employee + date
       const searchRes = await fetch(
         `${API_BASE}/attendance?employee_id=${request.employeeId}&date=${request.date}&limit=1`,
         { headers: authHeaders() }
@@ -914,12 +899,11 @@ export default function Attendance() {
       const searchJson = await searchRes.json();
       const existing: AttendanceRecord | undefined = searchJson.data?.[0];
 
-      // 2. Build payload — only overwrite fields covered by this request type
       const checkIn =
         request.type !== "check_out" && request.requestedCheckIn
           ? request.requestedCheckIn
           : existing?.check_in
-          ? formatTime(existing.check_in)   // keep existing as HH:MM
+          ? formatTime(existing.check_in)
           : null;
       const checkOut =
         request.type !== "check_in" && request.requestedCheckOut
@@ -941,14 +925,12 @@ export default function Attendance() {
       let apiRes: Response;
 
       if (existing) {
-        // 3a. Record exists → PATCH
         apiRes = await fetch(`${API_BASE}/attendance/${existing.id}`, {
           method: "PATCH",
           headers: authHeaders(),
           body: JSON.stringify(body),
         });
       } else {
-        // 3b. No record yet → POST
         apiRes = await fetch(`${API_BASE}/attendance`, {
           method: "POST",
           headers: authHeaders(),
@@ -960,14 +942,12 @@ export default function Attendance() {
       const apiJson = await apiRes.json();
       if (!apiJson.success) throw new Error(apiJson.message ?? "Failed to apply correction");
 
-      // 4. Mark approved in localStorage
       const updated = correctionRequests.map((r) =>
         r.id === id ? { ...r, status: "approved" as CorrectionRequestStatus, actionBy: editor } : r
       );
       saveCorrectionRequests(updated);
       setCorrectionRequests(updated);
 
-      // 5. Refresh daily log so table updates immediately
       await fetchDailyLog();
 
       toast({ title: "Request approved", description: "Attendance record updated in the database." });
@@ -1076,7 +1056,9 @@ export default function Attendance() {
     month: "long", day: "numeric", year: "numeric",
   });
 
-  const currentUser = getCurrentUser();
+  const shortDisplayDate = new Date(selectedDate + "T00:00:00").toLocaleDateString("en-US", {
+    month: "short", day: "numeric", year: "numeric",
+  });
 
   const elapsed = useMemo(() => {
     if (!myAttendance.checkIn || myAttendance.checkedOut) return null;
@@ -1103,7 +1085,7 @@ export default function Attendance() {
       <div className="bg-muted/30 border border-border rounded-lg p-4">
         <h4 className="text-sm font-semibold mb-1">ADMS Server URL</h4>
         <p className="text-xs text-muted-foreground mb-2">
-          Set this URL on your physical ZKTeco device under Communication → Cloud Server.
+          Set this URL on your ZKTeco device under Communication → Cloud Server.
         </p>
         <code className="text-xs bg-muted px-2 py-1 rounded font-mono-data">
           {window.location.origin}/adms
@@ -1254,7 +1236,7 @@ export default function Attendance() {
                 <DialogHeader>
                   <DialogTitle>ZKTeco Device Configuration</DialogTitle>
                   <DialogDescription>
-                    Manage ZKTeco K40 biometric devices. The device auto-registers on first punch using the serial number you configure on the physical unit.
+                    Manage ZKTeco K40 biometric devices. The device auto-registers on first punch using the serial number.
                   </DialogDescription>
                 </DialogHeader>
                 {deviceConfigContent}
@@ -1295,101 +1277,8 @@ export default function Attendance() {
 
           {/* ══ DAILY TAB ══ */}
           <TabsContent value="daily" className="space-y-5">
-            <div className="glass-card p-5">
-              <div className="flex items-center justify-between gap-6 flex-wrap">
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
-                    <Clock className="w-5 h-5 text-primary" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold">{currentUser?.name ?? "My Attendance"}</p>
-                    <p className="text-xs text-muted-foreground font-mono-data">
-                      {nepalLiveTime.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "UTC" })}
-                      {" · "}
-                      {nepalLiveTime.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })}
-                    </p>
-                  </div>
-                </div>
 
-                <div className="flex items-center gap-6 text-xs">
-                  <div className="text-center">
-                    <p className="text-muted-foreground mb-0.5">Check-in</p>
-                    <p className="font-mono-data font-semibold text-sm">
-                      {myAttendance.checkIn ? formatTime(myAttendance.checkIn) : "—"}
-                    </p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-muted-foreground mb-0.5">Check-out</p>
-                    <p className="font-mono-data font-semibold text-sm">
-                      {myAttendance.checkOut ? formatTime(myAttendance.checkOut) : "—"}
-                    </p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-muted-foreground mb-0.5">Time in Office</p>
-                    <p className="font-mono-data font-semibold text-sm text-primary">
-                      {myAttendance.checkedOut
-                        ? diffHours(formatTime(myAttendance.checkIn), formatTime(myAttendance.checkOut))
-                        : elapsed ?? "—"}
-                    </p>
-                  </div>
-                  {myAttendance.status && (
-                    <div className="text-center">
-                      <p className="text-muted-foreground mb-0.5">Status</p>
-                      <span className={`status-pill ${statusColors[myAttendance.status] ?? ""}`}>
-                        {statusLabel[myAttendance.status] ?? myAttendance.status}
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-2">
-                  {!myAttendance.checkedIn ? (
-                    <Button size="sm" className="gap-2 bg-success hover:bg-success/90 text-white" onClick={handleCheckIn} disabled={checkInLoading}>
-                      <LogIn className="w-4 h-4" />
-                      {checkInLoading ? "Checking in..." : "Check In"}
-                    </Button>
-                  ) : !myAttendance.checkedOut ? (
-                    <Button size="sm" variant="outline" className="gap-2 border-destructive text-destructive hover:bg-destructive/10" onClick={handleCheckOut} disabled={checkInLoading}>
-                      <LogOut className="w-4 h-4" />
-                      {checkInLoading ? "Checking out..." : "Check Out"}
-                    </Button>
-                  ) : (
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <CheckCircle2 className="w-4 h-4 text-success" />
-                      <span>Done for today</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div className="glass-card p-4 flex items-center justify-between gap-3 flex-wrap">
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-2">
-                  <CalendarIcon className="w-4 h-4 text-muted-foreground" />
-                  <span className="text-xs font-medium text-muted-foreground">Date</span>
-                </div>
-                <Input
-                  type="date"
-                  value={selectedDate}
-                  onChange={(e) => setSelectedDate(e.target.value)}
-                  className="h-8 w-40 text-xs font-mono-data"
-                />
-                <Button
-                  variant={isToday ? "default" : "outline"}
-                  size="sm" className="h-8 text-xs px-3"
-                  onClick={() => setSelectedDate(getTodayStr())}
-                >
-                  Today
-                </Button>
-              </div>
-              {isHR && (
-                <p className="text-xs text-muted-foreground">
-                  HR/Admin view · all employees · click <Pencil className="w-3 h-3 inline -mt-0.5 mx-0.5" /> to edit
-                </p>
-              )}
-            </div>
-
+            {/* ── Summary stat cards ── */}
             <div className="grid grid-cols-5 gap-4">
               {[
                 { label: "Present",   value: dailySummary.present,  icon: CheckCircle2, color: "text-success"     },
@@ -1399,28 +1288,49 @@ export default function Attendance() {
                 { label: "On Leave",  value: dailySummary.leave,     icon: CalendarIcon, color: "text-primary"     },
               ].map((s) => (
                 <div key={s.label} className="glass-card p-4">
-                  <div className="flex items-center gap-2 mb-3">
+                  <div className="flex items-center gap-2 mb-2">
                     <s.icon className={`w-4 h-4 ${s.color}`} />
-                    <span className={`text-xs font-semibold ${s.color}`}>{s.label}</span>
+                    <span className={`text-xs font-medium ${s.color}`}>{s.label}</span>
                   </div>
-                  <p className={`text-3xl font-bold font-mono-data ${s.color}`}>{s.value}</p>
+                  <p className={`text-2xl font-bold font-mono-data ${s.color}`}>{s.value}</p>
                 </div>
               ))}
             </div>
 
+            {/* ── Daily log table ── */}
             <div className="glass-card overflow-hidden">
-              <div className="px-5 py-4 border-b border-border flex items-center justify-between">
+              <div className="px-5 py-3 border-b border-border flex items-center justify-between">
                 <div>
                   <h2 className="text-sm font-semibold">
-                    Attendance Log · <span className="font-mono-data text-muted-foreground">{displayDate}</span>
+                    Today's Log · <span className="font-mono-data text-muted-foreground">{shortDisplayDate}</span>
                   </h2>
                   <p className="text-[11px] text-muted-foreground mt-0.5">
-                    Check-in / Check-out &amp; total time present in office. Times shown in Nepal Time (NPT).
+                    Check-in / Check-out &amp; total time present in office.{isHR && <> Click <Pencil className="w-2.5 h-2.5 inline -mt-0.5" /> to edit.</>}
                   </p>
                 </div>
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <Clock className="w-3.5 h-3.5" />
-                  <span className="font-mono-data">Shift: 09:00 — 17:00 NPT</span>
+                <div className="flex items-center gap-3">
+                  {/* ── Inline date picker ── */}
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="date"
+                      value={selectedDate}
+                      onChange={(e) => setSelectedDate(e.target.value)}
+                      className="h-8 w-40 text-xs font-mono-data"
+                    />
+                    <Button
+                      variant={isToday ? "default" : "outline"}
+                      size="sm"
+                      className="h-8 text-xs px-3"
+                      onClick={() => setSelectedDate(getTodayStr())}
+                    >
+                      Today
+                    </Button>
+                  </div>
+                  <div className="h-5 w-px bg-border" />
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <Clock className="w-3.5 h-3.5" />
+                    <span className="font-mono-data">Shift: 09:00 — 17:00</span>
+                  </div>
                 </div>
               </div>
 
@@ -1440,8 +1350,8 @@ export default function Attendance() {
                         <th>ID</th>
                         <th>Employee</th>
                         <th>Department</th>
-                        <th><div className="flex items-center gap-1"><LogIn  className="w-3 h-3" /> Check-in (NPT)</div></th>
-                        <th><div className="flex items-center gap-1"><LogOut className="w-3 h-3" /> Check-out (NPT)</div></th>
+                        <th><div className="flex items-center gap-1"><LogIn  className="w-3 h-3" /> Check-in</div></th>
+                        <th><div className="flex items-center gap-1"><LogOut className="w-3 h-3" /> Check-out</div></th>
                         <th><div className="flex items-center gap-1"><Timer  className="w-3 h-3" /> Total Time</div></th>
                         <th>Source</th>
                         <th>Status</th>
@@ -1451,7 +1361,7 @@ export default function Attendance() {
                     <tbody>
                       {dailyLog.map((row) => (
                         <tr key={row.id}>
-                          <td className="font-mono-data text-xs text-muted-foreground">{row.employeeId}</td>
+                          <td className="font-mono-data text-xs text-muted-foreground">{shortId(row.employeeId)}</td>
                           <td>
                             <div className="text-sm font-medium">{row.name}</div>
                             {row.edited && (
@@ -1545,17 +1455,17 @@ export default function Attendance() {
                 { label: "Leave Days",          value: monthlyTotals.totalLeave,   icon: Clock,        color: "text-primary"     },
               ].map((s) => (
                 <div key={s.label} className="glass-card p-4">
-                  <div className="flex items-center gap-2 mb-3">
+                  <div className="flex items-center gap-2 mb-2">
                     <s.icon className={`w-4 h-4 ${s.color}`} />
-                    <span className={`text-xs font-semibold ${s.color}`}>{s.label}</span>
+                    <span className={`text-xs font-medium ${s.color}`}>{s.label}</span>
                   </div>
-                  <p className={`text-3xl font-bold font-mono-data ${s.color}`}>{s.value}</p>
+                  <p className={`text-2xl font-bold font-mono-data ${s.color}`}>{s.value}</p>
                 </div>
               ))}
             </div>
 
             <div className="glass-card overflow-hidden">
-              <div className="px-5 py-4 border-b border-border">
+              <div className="px-5 py-3 border-b border-border">
                 <h2 className="text-sm font-semibold">
                   Monthly Attendance Report ·{" "}
                   <span className="font-mono-data text-muted-foreground">
@@ -1793,7 +1703,7 @@ export default function Attendance() {
                                 <tr key={m.id}>
                                   <td>
                                     <div className="text-sm font-medium">{name}</div>
-                                    <div className="text-[11px] font-mono-data text-muted-foreground">{m.employee_id}</div>
+                                    <div className="text-[11px] font-mono-data text-muted-foreground">{shortId(m.employee_id)}</div>
                                   </td>
                                   <td><span className="font-mono-data text-xs font-semibold text-primary">{m.biometric_id}</span></td>
                                   <td className="text-sm">{m.device?.device_name ?? "—"}</td>
@@ -1956,7 +1866,7 @@ export default function Attendance() {
         <DialogContent className="max-w-4xl">
           <DialogHeader>
             <DialogTitle>Attendance Correction Requests</DialogTitle>
-            <DialogDescription>Approve or reject employee-submitted check-in / check-out corrections.</DialogDescription>
+            <DialogDescription>Approve or reject employee-submitted corrections.</DialogDescription>
           </DialogHeader>
           <div className="max-h-[60vh] overflow-y-auto">
             {correctionRequests.length === 0 ? (
@@ -1983,7 +1893,7 @@ export default function Attendance() {
                       </td>
                       <td>
                         <div className="text-sm font-medium">{r.employeeName}</div>
-                        <div className="text-[11px] font-mono-data text-muted-foreground">{r.employeeId}</div>
+                        <div className="text-[11px] font-mono-data text-muted-foreground">{shortId(r.employeeId)}</div>
                       </td>
                       <td className="font-mono-data text-xs">{r.date}</td>
                       <td className="text-xs">{correctionTypeLabel[r.type]}</td>
@@ -2050,9 +1960,9 @@ export default function Attendance() {
             <DialogDescription>
               {editRow && (
                 <span>
-                  {editRow.name} · <span className="font-mono-data">{editRow.employeeId}</span>
+                  {editRow.name} · <span className="font-mono-data">{shortId(editRow.employeeId)}</span>
                   {" · "}
-                  <span className="font-mono-data text-muted-foreground">{displayDate} (NPT)</span>
+                  <span className="font-mono-data text-muted-foreground">{shortDisplayDate}</span>
                 </span>
               )}
             </DialogDescription>
@@ -2060,11 +1970,11 @@ export default function Attendance() {
           <div className="space-y-3 pt-1">
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs text-muted-foreground mb-1 block">Check-in (NPT)</label>
+                <label className="text-xs text-muted-foreground mb-1 block">Check-in</label>
                 <Input type="time" value={editDraft.checkIn} onChange={(e) => setEditDraft((d) => ({ ...d, checkIn: e.target.value }))} className="h-9 font-mono-data" />
               </div>
               <div>
-                <label className="text-xs text-muted-foreground mb-1 block">Check-out (NPT)</label>
+                <label className="text-xs text-muted-foreground mb-1 block">Check-out</label>
                 <Input type="time" value={editDraft.checkOut} onChange={(e) => setEditDraft((d) => ({ ...d, checkOut: e.target.value }))} className="h-9 font-mono-data" />
               </div>
             </div>
@@ -2132,7 +2042,7 @@ export default function Attendance() {
                       <td className="text-[11px] text-muted-foreground font-mono-data">
                         {utcToNepalDate(new Date(a.at)).toLocaleString("en-US", { timeZone: "UTC" })}
                       </td>
-                      <td className="text-xs font-mono-data">{a.empId}</td>
+                      <td className="text-xs font-mono-data">{shortId(a.empId)}</td>
                       <td className="text-xs">{a.field}</td>
                       <td className="text-xs font-mono-data text-destructive">{a.oldValue}</td>
                       <td className="text-xs font-mono-data text-success">{a.newValue}</td>

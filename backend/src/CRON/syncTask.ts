@@ -7,6 +7,78 @@ const DEVICE_IP = "192.168.110.64";
 const DEVICE_PORT = 4370;
 const NEPAL_OFFSET_MS = (5 * 60 + 45) * 60 * 1000;
 
+const MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 3000;
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Fetches ALL attendance logs from the ZK device with retry logic.
+ * The device sometimes returns partial data on the first call —
+ * retrying with a fresh socket is the most reliable fix.
+ */
+async function fetchLogsWithRetry(): Promise<any[]> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    const zk = new ZKLib(DEVICE_IP, DEVICE_PORT, 300000, 4000, 0, "tcp");
+
+    try {
+      console.log(
+        `[SYNC] Connecting to device (attempt ${attempt}/${MAX_RETRIES})...`,
+      );
+      await zk.createSocket();
+
+      // Disable the device during read to prevent new punches
+      // from corrupting the buffer mid-fetch (optional but recommended).
+      try {
+        await zk.disableDevice();
+      } catch (_) {}
+
+      const result = await zk.getAttendances();
+      const logs: any[] = result?.data ?? [];
+
+      console.log(`[SYNC] Fetched ${logs.length} raw log entries from device.`);
+
+      if (logs.length === 0 && attempt < MAX_RETRIES) {
+        // Empty result is suspicious — retry
+        throw new Error("Device returned 0 logs, may be a partial read.");
+      }
+
+      try {
+        await zk.enableDevice();
+      } catch (_) {}
+      await zk.disconnect();
+
+      return logs;
+    } catch (err: any) {
+      lastError = err;
+      console.warn(`[SYNC] Attempt ${attempt} failed: ${err.message}`);
+
+      // Always try to re-enable and disconnect cleanly
+      try {
+        await zk.enableDevice();
+      } catch (_) {}
+      try {
+        await zk.disconnect();
+      } catch (_) {}
+
+      if (attempt < MAX_RETRIES) {
+        console.log(`[SYNC] Retrying in ${RETRY_DELAY_MS / 1000}s...`);
+        await sleep(RETRY_DELAY_MS);
+      }
+    }
+  }
+
+  throw new Error(
+    `All ${MAX_RETRIES} attempts failed. Last error: ${lastError?.message}`,
+  );
+}
+
+// ── Main sync ─────────────────────────────────────────────────────────────────
+
 export const runAttendanceSync = async () => {
   if (isSyncing) {
     console.log("[SYNC] Already in progress, skipping...");
@@ -19,23 +91,26 @@ export const runAttendanceSync = async () => {
     return;
   }
 
-  const zk = new ZKLib(DEVICE_IP, DEVICE_PORT, 200000, 4000, 0, "tcp");
-
   try {
     isSyncing = true;
-    await zk.createSocket();
 
-    const logs = await zk.getAttendances();
+    // ── 1. Fetch all logs (with retry) ───────────────────────────────────────
+    const rawLogs = await fetchLogsWithRetry();
 
-    // Sort ascending — ensures first punch processed first per employee-day
-    const sortedLogs = [...logs.data].sort(
+    // Sort ascending — first punch first per employee-day
+    const sortedLogs = [...rawLogs].sort(
       (a, b) =>
         (a.recordTime as Date).getTime() - (b.recordTime as Date).getTime(),
     );
 
-    // ── Group punches by employee + Nepal calendar date ──────────────────────
-    // Do this BEFORE hitting the DB so each employee-day is resolved once,
-    // not punch-by-punch (avoids the re-run overwrite bug).
+    // ── 2. Pre-load ALL device mappings in one query ──────────────────────────
+    // (avoids N+1 DB calls inside the loop, which caused timeouts on large sets)
+    const allMappings = await prisma.deviceMapping.findMany();
+    const mappingByBiometricId = new Map(
+      allMappings.map((m) => [m.biometric_id, m]),
+    );
+
+    // ── 3. Group punches by employee + Nepal calendar date ───────────────────
     type DayKey = string;
     const groups = new Map<
       DayKey,
@@ -47,11 +122,14 @@ export const runAttendanceSync = async () => {
       }
     >();
 
+    let skippedUnmapped = 0;
+
     for (const log of sortedLogs) {
-      const mapping = await prisma.deviceMapping.findFirst({
-        where: { biometric_id: String(log.deviceUserId) },
-      });
-      if (!mapping) continue;
+      const mapping = mappingByBiometricId.get(String(log.deviceUserId));
+      if (!mapping) {
+        skippedUnmapped++;
+        continue;
+      }
 
       const punchUTC = log.recordTime as Date;
       const nepalMs = punchUTC.getTime() + NEPAL_OFFSET_MS;
@@ -76,9 +154,36 @@ export const runAttendanceSync = async () => {
       groups.get(key)!.punches.push(punchUTC);
     }
 
-    // ── Upsert one record per employee-day ───────────────────────────────────
+    if (skippedUnmapped > 0) {
+      console.warn(
+        `[SYNC] Skipped ${skippedUnmapped} punches with no device mapping.`,
+      );
+    }
+
+    console.log(`[SYNC] Processing ${groups.size} employee-day groups...`);
+
+    // ── 4. Pre-load ALL existing attendance records in one query ─────────────
+    const employeeIds = [
+      ...new Set([...groups.values()].map((g) => g.employeeId)),
+    ];
+    const existingRecords = await prisma.attendance.findMany({
+      where: { employee_id: { in: employeeIds } },
+    });
+
+    // Index by "employeeId__dateISO" for O(1) lookup
+    const existingByKey = new Map(
+      existingRecords.map((r) => [
+        `${r.employee_id}__${r.date.toISOString()}`,
+        r,
+      ]),
+    );
+
+    // ── 5. Upsert one record per employee-day ────────────────────────────────
+    let created = 0;
+    let updated = 0;
+    let skipped = 0;
+
     for (const { employeeId, biometricId, date, punches } of groups.values()) {
-      // Already sorted, but sort within group to be safe
       punches.sort((a, b) => a.getTime() - b.getTime());
 
       const checkIn = punches[0];
@@ -90,14 +195,13 @@ export const runAttendanceSync = async () => {
       const isLate = h > 8 || (h === 8 && m > 0);
 
       console.log(
-        `[SYNC] ${employeeId} | date: ${date.toISOString().slice(0, 10)}` +
+        `[SYNC] ${employeeId} | ${date.toISOString().slice(0, 10)}` +
           ` | in: ${checkIn.toISOString()} (${h}:${String(m).padStart(2, "0")} NPT)` +
           (checkOut ? ` | out: ${checkOut.toISOString()}` : " | no check-out"),
       );
 
-      const existing = await prisma.attendance.findUnique({
-        where: { employee_id_date: { employee_id: employeeId, date } },
-      });
+      const key = `${employeeId}__${date.toISOString()}`;
+      const existing = existingByKey.get(key);
 
       if (!existing) {
         await prisma.attendance.create({
@@ -111,9 +215,9 @@ export const runAttendanceSync = async () => {
             deviceId: device.serial_number,
           },
         });
+        created++;
       } else {
-        // On re-runs: only update check_out if the new last punch is later.
-        // Never overwrite check_in — it was correct from the first sync run.
+        // Only update check_out if the new last punch is later than what's stored
         const betterCheckOut =
           checkOut &&
           (!existing.check_out ||
@@ -126,17 +230,19 @@ export const runAttendanceSync = async () => {
             where: { employee_id_date: { employee_id: employeeId, date } },
             data: { check_out: betterCheckOut },
           });
+          updated++;
+        } else {
+          skipped++;
         }
       }
     }
 
-    console.log("✅ Sync complete.");
+    console.log(
+      `✅ Sync complete — created: ${created}, updated: ${updated}, unchanged: ${skipped}`,
+    );
   } catch (err: any) {
     console.error("❌ Sync failed:", err.message);
   } finally {
-    try {
-      await zk.disconnect();
-    } catch (_) {}
     isSyncing = false;
   }
 };
