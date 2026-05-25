@@ -1,4 +1,3 @@
-// src/pages/EmployeeSelfService.tsx
 import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { z } from "zod";
@@ -481,10 +480,32 @@ export default function EmployeeSelfService() {
       setProfileErrors({});
       markChanged("profile");
       toast({ title: "Profile updated", description: "Awaiting HR verification." });
-    } catch (err) {
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { errors?: Record<string, string[]> } } };
+      const apiErrors = axiosErr?.response?.data?.errors;
+
+      if (apiErrors && typeof apiErrors === "object") {
+        const mapped: ProfileErrors = {};
+        for (const [field, messages] of Object.entries(apiErrors)) {
+          const key = field as keyof ProfileFormData;
+          if (Array.isArray(messages) && messages[0]) {
+            mapped[key] = humanizeZodMessage(key, messages[0]);
+          }
+        }
+        if (Object.keys(mapped).length > 0) {
+          setProfileErrors(mapped);
+          const errorCount = Object.keys(mapped).length;
+          toast({
+            title: `${errorCount} field${errorCount > 1 ? "s" : ""} need${errorCount === 1 ? "s" : ""} attention`,
+            description: "Please fix the highlighted fields below.",
+            variant: "destructive",
+          });
+          return;
+        }
+      }
+
       toast({ title: "Failed to save profile", description: errMsg(err), variant: "destructive" });
     } finally { setSaving(false); }
-  };
 
   const handleSaveBank = async () => {
     if (!employee?.id) return;
@@ -1347,4 +1368,4 @@ export default function EmployeeSelfService() {
       </motion.div>
     </motion.div>
   );
-}
+}}
