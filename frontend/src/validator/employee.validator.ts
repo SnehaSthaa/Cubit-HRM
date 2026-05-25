@@ -340,8 +340,6 @@ export const createLeavePolicySchema = z.object({
 
 export const updateLeavePolicySchema = createLeavePolicySchema.partial();
 
-// ─── Report ───────────────────────────────────────────────────────────────────
-
 export const createReportSchema = z.object({
   name: z.string().min(1, "Report name is required"),
   type: ReportTypeEnum,

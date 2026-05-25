@@ -28,6 +28,8 @@ function pingDevice(ip: string, port = ZK_DEFAULT_PORT): Promise<boolean> {
   });
 }
 
+// ── FIXED: added department include so the mapping response always carries
+//    the employee's department name for display in the User Mapping table.
 const mappingInclude = {
   employee: {
     include: {
@@ -38,6 +40,14 @@ const mappingInclude = {
           email: true,
           phone: true,
         },
+      },
+      department: {
+        select: {
+          department_name: true,
+          designation: true,
+        },
+        orderBy: { joining_date: "desc" } as const,
+        take: 1,
       },
     },
   },

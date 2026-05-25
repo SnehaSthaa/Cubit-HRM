@@ -1,6 +1,7 @@
 // src/pages/EmployeeSelfService.tsx
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
+import { z } from "zod";
 import {
   User, FileText, CreditCard, CalendarDays, Edit2, Upload, Plus,
   Phone, Mail, Building2, Package, AlertCircle, Check, X, Trash2,
@@ -20,9 +21,44 @@ import type { Employee, EmployeeAPI, EmergencyContact, EmployeeDocument, LeaveBa
 import { getLatestDepartment, normalizeEmployee } from "@/types";
 import { apiClient, type AssetApi } from "@/services/apiClient";
 
-const itemVariant = { hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0 } };
-const containerVariant = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.04 } } };
+// ── Inline Zod schema (no external validator file needed) ─────────────────────
+const fuzzyEnum = (options: string[]) =>
+  z.preprocess(
+    (val) => {
+      if (val === "" || val === null || val === undefined) return undefined;
+      if (typeof val === "string") {
+        const normalized = val.trim().toLowerCase();
+        const match = options.find((opt) => opt.toLowerCase() === normalized);
+        return match ?? val;
+      }
+      return val;
+    },
+    z.enum(options as [string, ...string[]]),
+  );
 
+const updatePersonalDetailSchema = z.object({
+  first_name:         z.string().trim().min(1, "First name is required").optional(),
+  last_name:          z.string().trim().min(1, "Last name is required").optional(),
+  email:              z.string().email("Must be a valid email address").optional(),
+  phone:              z.preprocess((v) => (v === "" || v === null ? undefined : v), z.string().optional()),
+  date_of_birth:      z.preprocess(
+    (v) => (v === "" || v === null ? undefined : v),
+    z.string().refine((v) => !v || !isNaN(new Date(v).getTime()), "Invalid date").optional(),
+  ),
+  gender:             fuzzyEnum(["Male", "Female", "Others"]).optional(),
+  marital_status:     fuzzyEnum(["Single", "Married", "Divorced", "Widowed"]).optional(),
+  citizenship_number: z.string().optional(),
+  pan_number:         z.string().optional(),
+  nid_number:         z.string().optional(),
+  ssid_number:        z.string().optional(),
+  father_name:        z.string().optional(),
+  mother_name:        z.string().optional(),
+  grandfather_name:   z.string().optional(),
+  current_address:    z.string().optional(),
+  permanent_address:  z.string().optional(),
+});
+
+// ── Types ─────────────────────────────────────────────────────────────────────
 interface BankFormData {
   bank_name: string; account_number: string; branch: string;
   salary: string; contract_type: string;
@@ -40,8 +76,37 @@ interface ProfileFormData {
   citizenship_number: string; pan_number: string;
   nid_number: string; ssid_number: string;
 }
-type Section = "profile" | "bank" | "department";
+// Internal shape of employees returned from getEmployees()
+interface RawEmployeeRecord {
+  id: string;
+  user_id?: string;
+  personal_details?: { email?: string };
+  [key: string]: unknown;
+}
 
+type Section = "profile" | "bank" | "department";
+type ProfileErrors = Partial<Record<keyof ProfileFormData, string>>;
+
+const itemVariant = { hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0 } };
+const containerVariant = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.04 } } };
+
+// ── Inline field error component ──────────────────────────────────────────────
+function FieldError({ message }: { message?: string }) {
+  if (!message) return null;
+  return (
+    <motion.p
+      initial={{ opacity: 0, y: -4 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -4 }}
+      className="text-[11px] text-destructive mt-1 flex items-center gap-1 font-medium"
+    >
+      <AlertCircle className="w-3 h-3 shrink-0" />
+      {message}
+    </motion.p>
+  );
+}
+
+// ── Constants ─────────────────────────────────────────────────────────────────
 const leaveTypeIcons: Record<string, LucideIcon> = {
   sick: Stethoscope, paid: Briefcase, vacation: Plane,
   casual: Coffee, unpaid: AlertTriangle, maternity: Baby,
@@ -64,6 +129,7 @@ const EMPTY_BANK: BankFormData = { bank_name: "", account_number: "", branch: ""
 const EMPTY_DEPT: DeptFormData = { department_name: "", designation: "", level: "", hierarchy: "", joining_date: "", previous_experience: "", employment_type: "", employment_status: "" };
 const EMPTY_PROFILE: ProfileFormData = { first_name: "", last_name: "", email: "", phone: "", date_of_birth: "", gender: "", marital_status: "", father_name: "", grandfather_name: "", mother_name: "", current_address: "", permanent_address: "", citizenship_number: "", pan_number: "", nid_number: "", ssid_number: "" };
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
 function toDateStr(val: unknown): string {
   if (!val) return "";
   const s = String(val);
@@ -71,11 +137,13 @@ function toDateStr(val: unknown): string {
   const d = new Date(s);
   return isNaN(d.getTime()) ? "" : d.toISOString().split("T")[0];
 }
+
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message;
-  if (err && typeof err === "object" && "message" in err) return String((err  ).message);
+  if (err && typeof err === "object" && "message" in err) return String((err as Record<string, unknown>).message);
   return "An unexpected error occurred";
 }
+
 function profileFromEmployee(e: Employee, userEmail?: string): ProfileFormData {
   const p = e.personal_details;
   return {
@@ -97,6 +165,7 @@ function profileFromEmployee(e: Employee, userEmail?: string): ProfileFormData {
     ssid_number:        p?.ssid_number        ?? "",
   };
 }
+
 function bankFromEmployee(e: Employee): BankFormData {
   const b = e.bank_details;
   return {
@@ -107,6 +176,7 @@ function bankFromEmployee(e: Employee): BankFormData {
     contract_type:  b?.contract_type  ?? "",
   };
 }
+
 function deptFromEmployee(e: Employee): DeptFormData {
   const d = getLatestDepartment(e.department);
   return {
@@ -121,6 +191,27 @@ function deptFromEmployee(e: Employee): DeptFormData {
   };
 }
 
+// ── Human-readable Zod field error messages ───────────────────────────────────
+const fieldLabels: Partial<Record<keyof ProfileFormData, string>> = {
+  first_name: "First name", last_name: "Last name", email: "Email",
+  phone: "Phone", date_of_birth: "Date of birth", gender: "Gender",
+  marital_status: "Marital status", father_name: "Father's name",
+  grandfather_name: "Grandfather's name", mother_name: "Mother's name",
+  current_address: "Current address", permanent_address: "Permanent address",
+  citizenship_number: "Citizenship number", pan_number: "PAN number",
+  nid_number: "NID number", ssid_number: "SSF SSID",
+};
+
+function humanizeZodMessage(field: keyof ProfileFormData, zodMessage: string): string {
+  const label = fieldLabels[field] ?? field;
+  if (zodMessage.includes("Invalid email") || zodMessage.includes("valid email")) return `${label} must be a valid email address`;
+  if (zodMessage.includes("too_small") || zodMessage.includes("at least") || zodMessage.includes("required")) return `${label} is required`;
+  if (zodMessage.includes("Invalid enum") || zodMessage.includes("Invalid option")) return `Please select a valid ${label.toLowerCase()}`;
+  if (zodMessage.includes("invalid_date") || zodMessage.includes("Invalid date")) return `${label} is not a valid date`;
+  return `${label}: ${zodMessage}`;
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
 export default function EmployeeSelfService() {
   const { toast } = useToast();
   const { isHR } = useRole();
@@ -139,6 +230,7 @@ export default function EmployeeSelfService() {
   const [empStatus, setEmpStatus] = useState("Active");
   const [editing, setEditing] = useState(false);
   const [profileForm, setProfileForm] = useState<ProfileFormData>(EMPTY_PROFILE);
+  const [profileErrors, setProfileErrors] = useState<ProfileErrors>({});
   const [profileImage, setProfileImage] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
@@ -173,13 +265,23 @@ export default function EmployeeSelfService() {
     setChangedSections((prev) => new Set(prev).add(section));
   }
 
+  function clearError(field: keyof ProfileFormData) {
+    setProfileErrors((prev) => {
+      if (!prev[field]) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  }
+
+  // ── Load profile ─────────────────────────────────────────────────────────
   useEffect(() => {
     (async () => {
       try {
         setLoading(true);
         const res = await apiClient.getMe();
         const meUser = res.data?.user;
-        let rawEmployee = res.data?.employee as EmployeeAPI | null ?? null;
+        let rawEmployee = (res.data?.employee as EmployeeAPI | null) ?? null;
 
         if (!meUser) {
           toast({ title: "Could not identify logged-in user", variant: "destructive" });
@@ -190,14 +292,16 @@ export default function EmployeeSelfService() {
         if (!rawEmployee) {
           try {
             const allRes = await apiClient.getEmployees();
-            const employees = allRes.data ?? [];
-            rawEmployee = employees.find((emp) => {
-              if ((emp  ).user_id && meUser.id && (emp ).user_id === meUser.id) return true;
-              const pdEmail = (emp ).personal_details?.email ?? "";
+            // ── FIX: cast through unknown to bridge EmployeeAPI[] ↔ RawEmployeeRecord[] ──
+            const employees = (allRes.data ?? []) as unknown as RawEmployeeRecord[];
+            const found = employees.find((emp) => {
+              if (emp.user_id && meUser.id && emp.user_id === meUser.id) return true;
+              const pdEmail = emp.personal_details?.email ?? "";
               return pdEmail.toLowerCase() === meUser.email.toLowerCase();
-            }) ?? null;
+            });
+            rawEmployee = found ? (found as unknown as EmployeeAPI) : null;
           } catch {
-            // silently ignore
+            // silently ignore — will show "no profile" message below
           }
         }
 
@@ -228,41 +332,50 @@ export default function EmployeeSelfService() {
         setLoading(false);
       }
     })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ── Load sub-resources when employee resolves ─────────────────────────────
   useEffect(() => {
     if (!employee?.id) return;
     apiClient.getDocuments(employee.id)
       .then((res) => { const docs = (res.data as EmployeeDocument[]) ?? []; if (docs.length > 0) setDocuments(docs); })
       .catch(console.error);
     apiClient.getEmergencyContacts(employee.id)
-      .then((res) => { if (Array.isArray(res.data)) setEmergencyContacts(res.data); })
+      .then((res) => { if (Array.isArray(res.data)) setEmergencyContacts(res.data as EmergencyContact[]); })
       .catch(console.error);
     apiClient.getAssets({ assigned_to: employee.id })
       .then((res) => setEmployeeAssets(res.data ?? []))
       .catch(console.error);
   }, [employee?.id]);
 
+  // ── Load leave balance ────────────────────────────────────────────────────
+  const fetchLeaveBalance = useCallback(async (employeeId: string) => {
+    try {
+      const res = await apiClient.getLeaveBalance(employeeId);
+      if (res?.data) {
+        setLeaveBalance(res.data.map((l: LeaveBalance) => ({
+          ...l,
+          name: enumToLeaveType[l.leave_type_id] ?? l.leave_type_id,
+        })));
+      }
+    } catch (err) {
+      toast({ title: "Failed to fetch leave balance", description: errMsg(err), variant: "destructive" });
+    }
+  }, [toast]);
+
   useEffect(() => {
     if (!employee?.id) return;
-    apiClient.getLeaveBalance(employee.id)
-      .then((res) => {
-        if (res?.data) {
-          setLeaveBalance(res.data.map((l: LeaveBalance) => ({
-            ...l,
-            name: enumToLeaveType[l.leave_type_id] ?? l.leave_type_id,
-          })));
-        }
-      })
-      .catch((err) => toast({ title: "Failed to fetch leave balance", description: errMsg(err), variant: "destructive" }));
-  }, [employee?.id]);
+    fetchLeaveBalance(employee.id);
+  }, [employee?.id, fetchLeaveBalance]);
 
+  // ── Handlers ──────────────────────────────────────────────────────────────
   const handleProfileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files?.[0] || !employee?.id) return;
     try {
       setUploading(true);
       const res = await apiClient.uploadEmployeeProfileImage(employee.id, e.target.files[0]);
-      const imageUrl = res.data?.profile_image;
+      const imageUrl = res.data?.profile_image as string | undefined;
       if (imageUrl) setProfileImage(`${imageUrl}?t=${Date.now()}`);
       if (fileInputRef.current) fileInputRef.current.value = "";
     } catch (err) {
@@ -270,84 +383,115 @@ export default function EmployeeSelfService() {
     } finally { setUploading(false); }
   };
 
-  // ── ADDED BACK: was accidentally removed ──────────────────────────────────
- const handleSaveProfile = async () => {
-  if (!employee?.id) return;
-  if (!profileForm.first_name || !profileForm.last_name || !profileForm.email) {
-    toast({ title: "First name, last name and email are required", variant: "destructive" });
-    return;
-  }
-  try {
-    setSaving(true);
+  const handleSaveProfile = async () => {
+    if (!employee?.id) return;
+    setProfileErrors({});
 
-    const clean = (v: string) => v.trim() || undefined;
+    const result = updatePersonalDetailSchema.safeParse({
+      first_name:         profileForm.first_name         || undefined,
+      last_name:          profileForm.last_name          || undefined,
+      email:              profileForm.email              || undefined,
+      phone:              profileForm.phone              || undefined,
+      date_of_birth:      profileForm.date_of_birth      || undefined,
+      gender:             profileForm.gender             || undefined,
+      marital_status:     profileForm.marital_status     || undefined,
+      father_name:        profileForm.father_name        || undefined,
+      grandfather_name:   profileForm.grandfather_name   || undefined,
+      mother_name:        profileForm.mother_name        || undefined,
+      current_address:    profileForm.current_address    || undefined,
+      permanent_address:  profileForm.permanent_address  || undefined,
+      citizenship_number: profileForm.citizenship_number || undefined,
+      pan_number:         profileForm.pan_number         || undefined,
+      nid_number:         profileForm.nid_number         || undefined,
+      ssid_number:        profileForm.ssid_number        || undefined,
+    });
 
-    const payload: Record<string, unknown> = {
-      first_name:         profileForm.first_name.trim(),
-      last_name:          profileForm.last_name.trim(),
-      email:              profileForm.email.trim(),
-      phone:              clean(profileForm.phone),
-      date_of_birth:      clean(profileForm.date_of_birth),
-      gender:             clean(profileForm.gender),
-      marital_status:     clean(profileForm.marital_status),
-      father_name:        clean(profileForm.father_name),
-      grandfather_name:   clean(profileForm.grandfather_name),
-      mother_name:        clean(profileForm.mother_name),
-      current_address:    clean(profileForm.current_address),
-      permanent_address:  clean(profileForm.permanent_address),
-      citizenship_number: clean(profileForm.citizenship_number),
-      pan_number:         clean(profileForm.pan_number),
-      nid_number:         clean(profileForm.nid_number),
-      ssid_number:        clean(profileForm.ssid_number),
-    };
-    Object.keys(payload).forEach((k) => payload[k] === undefined && delete payload[k]);
-
-    await apiClient.updatePersonalDetails(employee.id, payload);
-
-    // ── Re-fetch from server to confirm what was actually saved ──
-    try {
-      const refreshed = await apiClient.getEmployees();
-      const found = (refreshed.data ?? []).find(
-        (e: { id: string }) => e.id === employee.id
-      );
-      if (found) {
-        const normalized = normalizeEmployee(found);
-        setEmployee(normalized);
-        setProfileForm(profileFromEmployee(normalized));
-        // Also refresh bank/dept so they don't go stale
-        const bank = bankFromEmployee(normalized);
-        setBankCommitted(bank); setBankDraft(bank);
-        const dept = deptFromEmployee(normalized);
-        setDeptCommitted(dept); setDeptDraft(dept);
+    if (!result.success) {
+      const errors: ProfileErrors = {};
+      for (const issue of result.error.issues) {
+        const field = issue.path[0] as keyof ProfileFormData;
+        if (field && !errors[field]) {
+          errors[field] = humanizeZodMessage(field, issue.message);
+        }
       }
-    } catch {
-      // Re-fetch failed — at least keep the optimistic local state
-      setEmployee((prev) =>
-        prev ? {
-          ...prev,
-          personal_details: {
-            ...prev.personal_details,
-            ...profileForm,
-            id: prev.personal_details?.id ?? "",
-            employee_id: employee.id,
-          },
-        } : prev
-      );
+      setProfileErrors(errors);
+      const errorCount = Object.keys(errors).length;
+      toast({
+        title: `${errorCount} field${errorCount > 1 ? "s" : ""} need${errorCount === 1 ? "s" : ""} attention`,
+        description: "Please fix the highlighted fields below.",
+        variant: "destructive",
+      });
+      return;
     }
 
-    setEditing(false);
-    markChanged("profile");
-    toast({ title: "Profile updated", description: "Awaiting HR verification." });
-  } catch (err) {
-    toast({ title: "Failed to save profile", description: errMsg(err), variant: "destructive" });
-  } finally { setSaving(false); }
-};
+    try {
+      setSaving(true);
+      const clean = (v: string) => v.trim() || undefined;
+      const payload: Record<string, unknown> = {
+        first_name:         profileForm.first_name.trim(),
+        last_name:          profileForm.last_name.trim(),
+        email:              profileForm.email.trim(),
+        phone:              clean(profileForm.phone),
+        date_of_birth:      clean(profileForm.date_of_birth),
+        gender:             clean(profileForm.gender),
+        marital_status:     clean(profileForm.marital_status),
+        father_name:        clean(profileForm.father_name),
+        grandfather_name:   clean(profileForm.grandfather_name),
+        mother_name:        clean(profileForm.mother_name),
+        current_address:    clean(profileForm.current_address),
+        permanent_address:  clean(profileForm.permanent_address),
+        citizenship_number: clean(profileForm.citizenship_number),
+        pan_number:         clean(profileForm.pan_number),
+        nid_number:         clean(profileForm.nid_number),
+        ssid_number:        clean(profileForm.ssid_number),
+      };
+      Object.keys(payload).forEach((k) => payload[k] === undefined && delete payload[k]);
+
+      await apiClient.updatePersonalDetails(employee.id, payload);
+
+      try {
+        const refreshed = await apiClient.getEmployees();
+        // ── FIX: cast through unknown to bridge EmployeeAPI[] ↔ RawEmployeeRecord[] ──
+        const allEmployees = (refreshed.data ?? []) as unknown as RawEmployeeRecord[];
+        const found = allEmployees.find((e: RawEmployeeRecord) => e.id === employee.id);
+        if (found) {
+          const normalized = normalizeEmployee(found as unknown as EmployeeAPI);
+          setEmployee(normalized);
+          setProfileForm(profileFromEmployee(normalized));
+          const bank = bankFromEmployee(normalized);
+          setBankCommitted(bank); setBankDraft(bank);
+          const dept = deptFromEmployee(normalized);
+          setDeptCommitted(dept); setDeptDraft(dept);
+        }
+      } catch {
+        setEmployee((prev) =>
+          prev ? {
+            ...prev,
+            personal_details: {
+              ...prev.personal_details,
+              ...profileForm,
+              id: prev.personal_details?.id ?? "",
+              employee_id: employee.id,
+            },
+          } : prev
+        );
+      }
+
+      setEditing(false);
+      setProfileErrors({});
+      markChanged("profile");
+      toast({ title: "Profile updated", description: "Awaiting HR verification." });
+    } catch (err) {
+      toast({ title: "Failed to save profile", description: errMsg(err), variant: "destructive" });
+    } finally { setSaving(false); }
+  };
 
   const handleSaveBank = async () => {
     if (!employee?.id) return;
     try {
       setSaving(true);
-await apiClient.upsertBankDetails(employee.id, bankDraft as unknown as Record<string, unknown>);      setBankCommitted({ ...bankDraft });
+      await apiClient.upsertBankDetails(employee.id, bankDraft as unknown as Record<string, unknown>);
+      setBankCommitted({ ...bankDraft });
       setEmployee((prev) =>
         prev ? { ...prev, bank_details: { ...prev.bank_details, ...bankDraft, id: prev.bank_details?.id ?? "", employee_id: employee.id } } : prev
       );
@@ -401,19 +545,12 @@ await apiClient.upsertBankDetails(employee.id, bankDraft as unknown as Record<st
           .filter((_, i) => results[i + 1]?.status === "fulfilled")
           .map((d) => d.id)
       );
-      if (verifyOk) {
-        setHasUnverifiedChanges(false);
-        setChangedSections(new Set());
-      }
+      if (verifyOk) { setHasUnverifiedChanges(false); setChangedSections(new Set()); }
       setDocuments((prev) =>
         prev.map((d) => approvedDocIds.has(d.id) ? { ...d, status: "Verified" as const } : d)
       );
       if (failures.length > 0) {
-        toast({
-          title: `${failures.length} item(s) failed to approve`,
-          description: "Some changes could not be verified. Please try again.",
-          variant: "destructive",
-        });
+        toast({ title: `${failures.length} item(s) failed to approve`, description: "Some changes could not be verified. Please try again.", variant: "destructive" });
       } else {
         const parts: string[] = [];
         if (changedSections.size > 0) parts.push(`${changedSections.size} section(s)`);
@@ -429,9 +566,7 @@ await apiClient.upsertBankDetails(employee.id, bankDraft as unknown as Record<st
     if (!employee?.id) return;
     try {
       const latestDept = getLatestDepartment(employee.department);
-      await apiClient.updateEmployee(employee.id, {
-        department: { id: latestDept?.id, employment_status: s },
-      });
+      await apiClient.updateEmployee(employee.id, { department: { id: latestDept?.id, employment_status: s } });
       setEmpStatus(s);
       setDeptCommitted((p) => ({ ...p, employment_status: s }));
       setDeptDraft((p) => ({ ...p, employment_status: s }));
@@ -547,6 +682,7 @@ await apiClient.upsertBankDetails(employee.id, bankDraft as unknown as Record<st
     } finally { setChangingPassword(false); }
   };
 
+  // ── Derived display values ─────────────────────────────────────────────────
   const displayName =
     `${employee?.personal_details?.first_name ?? ""} ${employee?.personal_details?.last_name ?? ""}`.trim() ||
     employee?.name || employee?.email || "—";
@@ -554,6 +690,7 @@ await apiClient.upsertBankDetails(employee.id, bankDraft as unknown as Record<st
     ((employee?.personal_details?.first_name?.[0] ?? "") + (employee?.personal_details?.last_name?.[0] ?? "")) ||
     employee?.email?.[0]?.toUpperCase() || "E";
 
+  // ── Loading / empty states ────────────────────────────────────────────────
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64 text-muted-foreground gap-2">
@@ -579,6 +716,7 @@ await apiClient.upsertBankDetails(employee.id, bankDraft as unknown as Record<st
     );
   }
 
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <motion.div variants={containerVariant} initial="hidden" animate="show" className="space-y-4">
       <motion.div variants={itemVariant}>
@@ -607,6 +745,7 @@ await apiClient.upsertBankDetails(employee.id, bankDraft as unknown as Record<st
         </motion.div>
       )}
 
+      {/* ── Profile header card ── */}
       <motion.div variants={itemVariant} className="bg-card border border-border rounded-lg p-5">
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-4">
@@ -671,7 +810,11 @@ await apiClient.upsertBankDetails(employee.id, bankDraft as unknown as Record<st
               {editing ? "Save" : "Edit Profile"}
             </Button>
             {editing && (
-              <Button variant="ghost" size="sm" className="press-effect" onClick={() => { setProfileForm(profileFromEmployee(employee)); setEditing(false); }}>
+              <Button variant="ghost" size="sm" className="press-effect" onClick={() => {
+                setProfileForm(profileFromEmployee(employee));
+                setProfileErrors({});
+                setEditing(false);
+              }}>
                 <X className="w-3.5 h-3.5" /> Cancel
               </Button>
             )}
@@ -679,16 +822,17 @@ await apiClient.upsertBankDetails(employee.id, bankDraft as unknown as Record<st
         </div>
       </motion.div>
 
+      {/* ── Tabs ── */}
       <motion.div variants={itemVariant}>
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
           <TabsList className="bg-muted/50 border border-border p-1 h-auto flex-wrap">
             {([
-              { value: "profile",    icon: User,         label: "Personal",     section: "profile"    as Section | null },
+              { value: "profile",    icon: User,         label: "Personal",     section: "profile"     as Section | null },
               { value: "documents",  icon: FileText,     label: "Documents",    section: null },
               { value: "leave",      icon: CalendarDays, label: "Leaves",       section: null },
               { value: "emergency",  icon: Phone,        label: "Emergency",    section: null },
-              { value: "bank",       icon: CreditCard,   label: "Bank Details", section: "bank"       as Section | null },
-              { value: "department", icon: Building2,    label: "Department",   section: "department" as Section | null },
+              { value: "bank",       icon: CreditCard,   label: "Bank Details", section: "bank"        as Section | null },
+              { value: "department", icon: Building2,    label: "Department",   section: "department"  as Section | null },
               { value: "assets",     icon: Package,      label: "Assets",       section: null },
               { value: "security",   icon: KeyRound,     label: "Security",     section: null },
             ] as const).map((t) => (
@@ -702,33 +846,74 @@ await apiClient.upsertBankDetails(employee.id, bankDraft as unknown as Record<st
                 {isHR && t.value === "documents" && pendingDocCount > 0 && (
                   <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-amber-500" />
                 )}
+                {t.value === "profile" && editing && Object.keys(profileErrors).length > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-destructive" />
+                )}
               </TabsTrigger>
             ))}
           </TabsList>
 
           {/* ══ Personal ══ */}
           <TabsContent value="profile" className="space-y-4">
+
+            {/* Validation error summary banner */}
+            {editing && Object.keys(profileErrors).length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: -8 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="flex items-start gap-3 px-4 py-3 rounded-xl border border-destructive/30 bg-destructive/5"
+              >
+                <AlertCircle className="w-4 h-4 text-destructive shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-semibold text-destructive">
+                    {Object.keys(profileErrors).length} field{Object.keys(profileErrors).length > 1 ? "s" : ""} need{Object.keys(profileErrors).length === 1 ? "s" : ""} attention
+                  </p>
+                  <ul className="mt-1 space-y-0.5">
+                    {Object.entries(profileErrors).map(([field, message]) => (
+                      <li key={field} className="text-xs text-destructive/80 flex items-center gap-1">
+                        <span className="w-1 h-1 rounded-full bg-destructive/60 shrink-0" />
+                        {message}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </motion.div>
+            )}
+
             <div className="bg-card border border-border rounded-lg p-5">
               <h3 className="text-sm font-semibold mb-4">Personal Information</h3>
               <div className="grid grid-cols-3 gap-4">
                 {([
-                  { label: "First Name",         key: "first_name" },
-                  { label: "Last Name",          key: "last_name" },
-                  { label: "Email",              key: "email" },
+                  { label: "First Name",         key: "first_name",         required: true },
+                  { label: "Last Name",          key: "last_name",          required: true },
+                  { label: "Email",              key: "email",              required: true },
                   { label: "Phone",              key: "phone",              mono: true },
                   { label: "Date of Birth",      key: "date_of_birth",      mono: true },
                   { label: "Citizenship Number", key: "citizenship_number" },
                   { label: "PAN Number",         key: "pan_number" },
                   { label: "NID Number",         key: "nid_number" },
                   { label: "SSF SSID",           key: "ssid_number" },
-                ] as { label: string; key: keyof ProfileFormData; mono?: boolean }[]).map((f) => (
+                ] as { label: string; key: keyof ProfileFormData; mono?: boolean; required?: boolean }[]).map((f) => (
                   <div key={f.key}>
-                    <p className="text-xs text-muted-foreground mb-1">{f.label}</p>
-                    {editing
-                      ? <Input type={f.key === "date_of_birth" ? "date" : "text"} value={profileForm[f.key] ?? ""} onChange={(e) => setProfileForm((p) => ({ ...p, [f.key]: e.target.value }))} className="h-8 text-sm" />
-                      : <p className={`text-sm ${f.mono ? "font-mono-data" : ""}`}>{profileForm[f.key] || "—"}</p>}
+                    <p className="text-xs text-muted-foreground mb-1">
+                      {f.label}{f.required && <span className="text-destructive ml-0.5">*</span>}
+                    </p>
+                    {editing ? (
+                      <>
+                        <Input
+                          type={f.key === "date_of_birth" ? "date" : "text"}
+                          value={profileForm[f.key] ?? ""}
+                          onChange={(e) => { setProfileForm((p) => ({ ...p, [f.key]: e.target.value })); clearError(f.key); }}
+                          className={`h-8 text-sm transition-colors ${profileErrors[f.key] ? "border-destructive focus-visible:ring-destructive/30 bg-destructive/5" : ""}`}
+                        />
+                        <FieldError message={profileErrors[f.key]} />
+                      </>
+                    ) : (
+                      <p className={`text-sm ${f.mono ? "font-mono-data" : ""}`}>{profileForm[f.key] || "—"}</p>
+                    )}
                   </div>
                 ))}
+
                 {([
                   { label: "Gender",         key: "gender",         options: ["Female", "Male", "Others"],                 placeholder: "Select gender" },
                   { label: "Marital Status", key: "marital_status", options: ["Single", "Married", "Divorced", "Widowed"], placeholder: "Select marital status" },
@@ -736,10 +921,20 @@ await apiClient.upsertBankDetails(employee.id, bankDraft as unknown as Record<st
                   <div key={field.key}>
                     <p className="text-xs text-muted-foreground mb-1">{field.label}</p>
                     {editing ? (
-                      <Select value={profileForm[field.key] ?? ""} onValueChange={(v) => setProfileForm((p) => ({ ...p, [field.key]: v }))}>
-                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder={field.placeholder} /></SelectTrigger>
-                        <SelectContent>{field.options.map((opt) => <SelectItem key={opt} value={opt} className="text-xs">{opt}</SelectItem>)}</SelectContent>
-                      </Select>
+                      <>
+                        <Select
+                          value={profileForm[field.key] ?? ""}
+                          onValueChange={(v) => { setProfileForm((p) => ({ ...p, [field.key]: v })); clearError(field.key); }}
+                        >
+                          <SelectTrigger className={`h-8 text-xs transition-colors ${profileErrors[field.key] ? "border-destructive focus-visible:ring-destructive/30 bg-destructive/5" : ""}`}>
+                            <SelectValue placeholder={field.placeholder} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {field.options.map((opt) => <SelectItem key={opt} value={opt} className="text-xs">{opt}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                        <FieldError message={profileErrors[field.key]} />
+                      </>
                     ) : (
                       <p className="text-sm">{profileForm[field.key] || "—"}</p>
                     )}
@@ -758,9 +953,18 @@ await apiClient.upsertBankDetails(employee.id, bankDraft as unknown as Record<st
                 ] as { label: string; key: keyof ProfileFormData }[]).map((f) => (
                   <div key={f.key}>
                     <p className="text-xs text-muted-foreground mb-1">{f.label}</p>
-                    {editing
-                      ? <Input value={profileForm[f.key] ?? ""} onChange={(e) => setProfileForm((p) => ({ ...p, [f.key]: e.target.value }))} className="h-8 text-sm" />
-                      : <p className="text-sm">{profileForm[f.key] || "—"}</p>}
+                    {editing ? (
+                      <>
+                        <Input
+                          value={profileForm[f.key] ?? ""}
+                          onChange={(e) => { setProfileForm((p) => ({ ...p, [f.key]: e.target.value })); clearError(f.key); }}
+                          className={`h-8 text-sm transition-colors ${profileErrors[f.key] ? "border-destructive focus-visible:ring-destructive/30 bg-destructive/5" : ""}`}
+                        />
+                        <FieldError message={profileErrors[f.key]} />
+                      </>
+                    ) : (
+                      <p className="text-sm">{profileForm[f.key] || "—"}</p>
+                    )}
                   </div>
                 ))}
               </div>
@@ -775,9 +979,18 @@ await apiClient.upsertBankDetails(employee.id, bankDraft as unknown as Record<st
                 ] as { label: string; key: keyof ProfileFormData }[]).map((f) => (
                   <div key={f.key}>
                     <p className="text-xs text-muted-foreground mb-1">{f.label}</p>
-                    {editing
-                      ? <Input value={profileForm[f.key] ?? ""} onChange={(e) => setProfileForm((p) => ({ ...p, [f.key]: e.target.value }))} className="h-8 text-sm" />
-                      : <p className="text-sm">{profileForm[f.key] || "—"}</p>}
+                    {editing ? (
+                      <>
+                        <Input
+                          value={profileForm[f.key] ?? ""}
+                          onChange={(e) => { setProfileForm((p) => ({ ...p, [f.key]: e.target.value })); clearError(f.key); }}
+                          className={`h-8 text-sm transition-colors ${profileErrors[f.key] ? "border-destructive focus-visible:ring-destructive/30 bg-destructive/5" : ""}`}
+                        />
+                        <FieldError message={profileErrors[f.key]} />
+                      </>
+                    ) : (
+                      <p className="text-sm">{profileForm[f.key] || "—"}</p>
+                    )}
                   </div>
                 ))}
               </div>
@@ -1080,7 +1293,7 @@ await apiClient.upsertBankDetails(employee.id, bankDraft as unknown as Record<st
                     <tr key={asset.id ?? idx}>
                       <td className="text-xs font-mono-data text-muted-foreground">{asset.asset_id}</td>
                       <td className="text-sm font-medium">{asset.name}</td>
-                      <td className="text-xs text-muted-foreground">{asset.category ?? (asset ).type}</td>
+                      <td className="text-xs text-muted-foreground">{(asset.category ?? (asset as AssetApi & { type?: string }).type) ?? "—"}</td>
                       <td className="text-xs font-mono-data text-muted-foreground">{asset.serial_number || "—"}</td>
                       <td className="text-xs font-mono-data text-muted-foreground">{toDateStr(asset.assigned_date) || "—"}</td>
                       <td><span className={`status-pill ${asset.status === "assigned" ? "status-active" : "status-pending"}`}>{asset.status}</span></td>

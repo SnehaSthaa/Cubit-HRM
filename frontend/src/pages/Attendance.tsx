@@ -74,11 +74,7 @@ interface AttendanceRecord {
       last_name: string;
       email: string;
     };
-    department?:
-      | Array<{ department_name: string } | { name: string }>
-      | string
-      | { department_name?: string; name?: string };
-    departments?: Array<{ department_name: string } | { name: string }>;
+    department?: Array<{ department_name: string }>;
   };
 }
 
@@ -133,7 +129,6 @@ interface AuditEntry {
   reason: string;
   at: string;
 }
-
 interface ApiMapping {
   id: string;
   employee_id: string;
@@ -143,7 +138,7 @@ interface ApiMapping {
   employee?: {
     id: string;
     personal_details?: { first_name: string; last_name: string };
-    department?: Array<{ department_name: string }>;
+    department?: Array<{ department_name: string; designation?: string }>;
   };
   device?: { id: string; device_name: string };
 }
@@ -176,7 +171,6 @@ interface CorrectionRequest {
   actionBy: string | null;
 }
 
-// ───── Config ─────
 const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:3000/api";
 
 const deviceModels = [
@@ -265,22 +259,14 @@ function getEmployeeName(record: AttendanceRecord): string {
   return record.employee_id;
 }
 
+// ── Reads department from AttendanceRecord (Department[] from schema) ──
 function getDepartment(record: AttendanceRecord): string {
-  const emp = record.employee;
-  if (!emp) return "—";
-  const dept = emp.department ?? emp.departments;
-  if (!dept) return "—";
-  if (typeof dept === "string") return dept || "—";
-  if (Array.isArray(dept)) {
-    const first = dept[0] as Record<string, string> | undefined;
-    if (!first) return "—";
-    return first.department_name ?? first.name ?? "—";
-  }
-  if (typeof dept === "object") {
-    const d = dept as Record<string, string>;
-    return d.department_name ?? d.name ?? "—";
-  }
-  return "—";
+  return record.employee?.department?.[0]?.department_name ?? "—";
+}
+
+// ── Reads department from ApiMapping's employee field (same Department[] shape) ──
+function getMappingDepartment(emp: ApiMapping["employee"]): string {
+  return emp?.department?.[0]?.department_name ?? "—";
 }
 
 function getTodayStr(): string {
@@ -657,43 +643,32 @@ export default function Attendance() {
   }, [activeTab, selectedMonth, selectedYear, fetchMonthlySummary, isHR, myEmployeeId]);
 
   const handleSync = async () => {
-  setSyncing(true);
-  try {
-    // 1. Trigger the ZKTeco device sync
-    const syncRes = await fetch(`${API_BASE}/attendance/sync`, {
-      headers: authHeaders(),
-    });
-
-    const syncJson = await syncRes.json();
-
-    if (!syncRes.ok || !syncJson.success) {
-      throw new Error(syncJson.message ?? "Device sync failed");
+    setSyncing(true);
+    try {
+      const syncRes = await fetch(`${API_BASE}/attendance/sync`, {
+        headers: authHeaders(),
+      });
+      const syncJson = await syncRes.json();
+      if (!syncRes.ok || !syncJson.success) {
+        throw new Error(syncJson.message ?? "Device sync failed");
+      }
+      toast({
+        title: "Device sync complete",
+        description: `${syncJson.data.recordsSavedOrUpdated} records saved · ${syncJson.data.unmappedLogsSkipped} skipped`,
+      });
+      await Promise.all([
+        fetchDailyLog(),
+        fetchMyAttendance(),
+        fetchDevices(),
+        fetchMappings(),
+        fetchUnmappedEmployees(),
+      ]);
+    } catch (err: unknown) {
+      toast({ title: "Sync failed", description: (err as Error).message, variant: "destructive" });
+    } finally {
+      setSyncing(false);
     }
-
-    toast({
-      title: "Device sync complete",
-      description: `${syncJson.data.recordsSavedOrUpdated} records saved · ${syncJson.data.unmappedLogsSkipped} skipped`,
-    });
-
-    // 2. Now refresh all UI data with the newly synced records
-    await Promise.all([
-      fetchDailyLog(),
-      fetchMyAttendance(),
-      fetchDevices(),
-      fetchMappings(),
-      fetchUnmappedEmployees(),
-    ]);
-
-  } catch (err: unknown) {
-    toast({
-      title: "Sync failed",
-      description: (err as Error).message,
-      variant: "destructive",
-    });
-  } finally {
-    setSyncing(false);
-  }
-};
+  };
 
   const handleAddDevice = async () => {
     if (!newDevice.name || !newDevice.ip || !newDevice.serial_number) {
@@ -1057,8 +1032,10 @@ export default function Attendance() {
     return apiMappings.filter((m) => {
       const pd   = m.employee?.personal_details;
       const name = pd ? `${pd.first_name} ${pd.last_name}`.toLowerCase() : "";
+      const dept = getMappingDepartment(m.employee).toLowerCase();
       return (
         name.includes(q) ||
+        dept.includes(q) ||
         m.employee_id.toLowerCase().includes(q) ||
         m.biometric_id.toLowerCase().includes(q) ||
         (m.device?.device_name ?? "").toLowerCase().includes(q)
@@ -1335,7 +1312,6 @@ export default function Attendance() {
                   </p>
                 </div>
                 <div className="flex items-center gap-3">
-                  {/* ── Inline date picker ── */}
                   <div className="flex items-center gap-2">
                     <Input
                       type="date"
@@ -1697,7 +1673,12 @@ export default function Attendance() {
                     </div>
                     <div className="relative w-60 shrink-0">
                       <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-                      <Input value={mappingSearch} onChange={(e) => setMappingSearch(e.target.value)} placeholder="Search employee, PIN, device..." className="h-8 pl-8 text-xs" />
+                      <Input
+                        value={mappingSearch}
+                        onChange={(e) => setMappingSearch(e.target.value)}
+                        placeholder="Search name, dept, PIN, device..."
+                        className="h-8 pl-8 text-xs"
+                      />
                     </div>
                   </div>
                   {mappingsLoading ? (
@@ -1710,6 +1691,7 @@ export default function Attendance() {
                         <thead>
                           <tr>
                             <th>Employee</th>
+                            <th>Department</th>
                             <th>Biometric PIN</th>
                             <th>Device</th>
                             <th>Enrolled</th>
@@ -1719,18 +1701,20 @@ export default function Attendance() {
                         <tbody>
                           {filteredMappings.length === 0 ? (
                             <tr>
-                              <td colSpan={5} className="text-center text-sm text-muted-foreground py-10">No mappings found.</td>
+                              <td colSpan={6} className="text-center text-sm text-muted-foreground py-10">No mappings found.</td>
                             </tr>
                           ) : (
                             filteredMappings.map((m) => {
                               const pd   = m.employee?.personal_details;
                               const name = pd ? `${pd.first_name} ${pd.last_name}` : m.employee_id;
+                              const dept = getMappingDepartment(m.employee);
                               return (
                                 <tr key={m.id}>
                                   <td>
                                     <div className="text-sm font-medium">{name}</div>
                                     <div className="text-[11px] font-mono-data text-muted-foreground">{shortId(m.employee_id)}</div>
                                   </td>
+                                  <td className="text-xs text-muted-foreground">{dept}</td>
                                   <td><span className="font-mono-data text-xs font-semibold text-primary">{m.biometric_id}</span></td>
                                   <td className="text-sm">{m.device?.device_name ?? "—"}</td>
                                   <td className="text-xs text-muted-foreground font-mono-data">
