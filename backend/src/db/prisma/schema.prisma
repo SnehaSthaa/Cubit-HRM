@@ -23,26 +23,27 @@ model User {
 }
 
 model Employee {
-  id                   String             @id @default(uuid()) @db.Uuid
-  user_id              String             @unique @db.Uuid
-  employee_id          String             @unique
-  manager_id           String?            @db.Uuid
+  id                   String              @id @default(uuid()) @db.Uuid
+  user_id              String              @unique @db.Uuid
+  employee_id          String              @unique
+  manager_id           String?             @db.Uuid
   notes                String?
-  created_at           DateTime           @default(now())
-  updated_at           DateTime           @updatedAt
-  employee_verified    Boolean            @default(false)
+  created_at           DateTime            @default(now())
+  updated_at           DateTime            @updatedAt
+  employee_verified    Boolean             @default(false)
   profile_image        String?
-  verification_pending Boolean            @default(false)
-  assets               Asset[]            @relation("AssetAssignee")
+  verification_pending Boolean             @default(false)
+  assets               Asset[]             @relation("AssetAssignee")
   attendance           Attendance[]
+  attendance_requests  AttendanceRequest[]
   bank_details         BankDetail?
   department           Department[]
   deviceMappings       DeviceMapping[]
   emergencyContacts    EmergencyContact[]
   documents            EmployeeDocument[]
-  manager              Employee?          @relation("EmployeeManager", fields: [manager_id], references: [id])
-  subordinates         Employee[]         @relation("EmployeeManager")
-  user                 User               @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  manager              Employee?           @relation("EmployeeManager", fields: [manager_id], references: [id])
+  subordinates         Employee[]          @relation("EmployeeManager")
+  user                 User                @relation(fields: [user_id], references: [id], onDelete: Cascade)
   leaveBalances        LeaveBalance[]
   leaves               Leave[]
   payroll              Payroll[]
@@ -156,6 +157,33 @@ model Attendance {
 
   @@unique([employee_id, date])
   @@map("attendance")
+}
+
+model AttendanceRequest {
+  id          String   @id @default(uuid()) @db.Uuid
+  employee_id String   @db.Uuid
+  date        DateTime @db.Date
+
+  request_type        AttendanceRequestType
+  requested_check_in  DateTime?             @db.Timestamptz
+  requested_check_out DateTime?             @db.Timestamptz
+  requested_status    AttendanceStatus?
+
+  reason String
+
+  status         AttendanceRequestStatus @default(pending)
+  reviewed_by    String?                 @db.Uuid
+  reviewed_at    DateTime?
+  reviewer_notes String?
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  employee Employee @relation(fields: [employee_id], references: [id], onDelete: Cascade)
+
+  @@index([employee_id])
+  @@index([status])
+  @@map("attendance_requests")
 }
 
 model Device {
@@ -311,6 +339,8 @@ model LeaveBalance {
   @@map("leave_balances")
 }
 
+// ── Enums ────────────────────────────────────────────────────────────────────
+
 enum UserRole {
   super_admin
   hr_admin
@@ -323,6 +353,18 @@ enum AttendanceStatus {
   late
   half_day
   on_leave
+}
+
+enum AttendanceRequestType {
+  check_in
+  check_out
+  both
+}
+
+enum AttendanceRequestStatus {
+  pending
+  approved
+  rejected
 }
 
 enum LeaveStatus {

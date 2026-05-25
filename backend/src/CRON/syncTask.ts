@@ -43,7 +43,6 @@ async function fetchLogsWithRetry(): Promise<any[]> {
       console.log(`[SYNC] Fetched ${logs.length} raw log entries from device.`);
 
       if (logs.length === 0 && attempt < MAX_RETRIES) {
-        // Empty result is suspicious — retry
         throw new Error("Device returned 0 logs, may be a partial read.");
       }
 

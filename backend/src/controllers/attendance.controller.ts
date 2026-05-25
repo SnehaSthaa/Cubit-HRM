@@ -73,6 +73,8 @@ function todayMidnight(): Date {
  * Converts an "HH:MM" or "HH:MM:SS" Nepal local time string into a
  * fake-UTC Date for DB storage.
  *
+ * Returns null if the input is empty, whitespace-only, or otherwise invalid.
+ *
  * Storage convention (matching ZKTeco device behaviour):
  *   The UTC digits of the stored Date ARE the Nepal local time.
  *   i.e. stored = "YYYY-MM-DDThh:mm:ssZ" where hh:mm:ss is Nepal local.
@@ -87,9 +89,20 @@ function todayMidnight(): Date {
  * NOTE: We do NOT subtract NEPAL_OFFSET_MS here. The device never does,
  * and we must be consistent with how device punches are stored.
  */
-function parseTimeString(hhmm: string, dateContext: Date): Date {
-  const normalized = hhmm.length === 5 ? `${hhmm}:00` : hhmm;
+function parseTimeString(
+  hhmm: string | null | undefined,
+  dateContext: Date,
+): Date | null {
+  // Guard: reject null, undefined, empty string, or whitespace-only
+  if (!hhmm?.trim()) return null;
+
+  const trimmed = hhmm.trim();
+  const normalized = trimmed.length === 5 ? `${trimmed}:00` : trimmed;
   const [h, m, s] = normalized.split(":").map(Number);
+
+  // Validate parsed numbers
+  if (isNaN(h) || isNaN(m)) return null;
+
   // dateContext.getTime() is already the fake-UTC Nepal midnight in ms.
   // Add hours/minutes/seconds directly — no offset subtraction.
   return new Date(
@@ -376,8 +389,8 @@ export class AttendanceController {
         data: {
           employee_id,
           date: dateContext,
-          check_in: check_in ? parseTimeString(check_in, dateContext) : null,
-          check_out: check_out ? parseTimeString(check_out, dateContext) : null,
+          check_in: parseTimeString(check_in, dateContext),
+          check_out: parseTimeString(check_out, dateContext),
           status: status as AttendanceStatus,
           notes: notes ?? null,
           deviceId: deviceSerial,
@@ -449,24 +462,16 @@ export class AttendanceController {
               },
             },
             update: {
-              check_in: r.check_in
-                ? parseTimeString(r.check_in, dateContext)
-                : null,
-              check_out: r.check_out
-                ? parseTimeString(r.check_out, dateContext)
-                : null,
+              check_in: parseTimeString(r.check_in, dateContext),
+              check_out: parseTimeString(r.check_out, dateContext),
               status: r.status,
               notes: r.notes ?? null,
             },
             create: {
               employee_id: r.employee_id,
               date: dateContext,
-              check_in: r.check_in
-                ? parseTimeString(r.check_in, dateContext)
-                : null,
-              check_out: r.check_out
-                ? parseTimeString(r.check_out, dateContext)
-                : null,
+              check_in: parseTimeString(r.check_in, dateContext),
+              check_out: parseTimeString(r.check_out, dateContext),
               status: r.status,
               notes: r.notes ?? null,
               deviceId: deviceSerial,
@@ -515,7 +520,7 @@ export class AttendanceController {
         value: string | null | undefined,
       ): Date | null | undefined {
         if (value === undefined) return undefined; // field not sent → don't touch it
-        if (!value) return null; // explicit null → clear it
+        if (!value?.trim()) return null; // null or empty string → clear it
         // Already a full ISO string? (shouldn't happen from the fixed frontend,
         // but handle gracefully to avoid double-conversion if old clients call this)
         if (value.includes("T")) {

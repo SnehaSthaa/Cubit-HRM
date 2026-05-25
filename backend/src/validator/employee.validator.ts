@@ -1,7 +1,5 @@
 import { z } from "zod";
 
-// ─── Reusable primitives ───────────────────────────────────────────────────────
-
 const dateString = z.string().refine((val) => {
   if (!val) return true;
   return !isNaN(new Date(val).getTime());
@@ -12,14 +10,24 @@ const pastDateString = dateString.refine((val) => {
   return new Date(val) <= new Date();
 }, "Date cannot be in the future");
 
+const adultDobString = dateString.refine((val) => {
+  if (!val) return true;
+  const dob = new Date(val);
+  const today = new Date();
+  const cutoff = new Date(
+    today.getFullYear() - 18,
+    today.getMonth(),
+    today.getDate(),
+  );
+  return dob <= cutoff;
+}, "Employee must be at least 18 years old");
+
 const uuidString = z.string().uuid("Invalid UUID format");
 
 const decimalNumber = z
   .number()
   .positive("Must be a positive number")
   .multipleOf(0.01, "Max 2 decimal places");
-
-// ─── Enums ────────────────────────────────────────────────────────────────────
 
 export const UserRoleEnum = z.enum(["super_admin", "hr_admin", "employee"]);
 export const GenderEnum = z.enum(["Male", "Female", "Others"]);
@@ -84,7 +92,7 @@ export const createPersonalDetailSchema = z.object({
   last_name: z.string().min(1, "Last name is required"),
   email: z.string().email("Invalid email"),
   phone: z.string().nullable().optional(),
-  date_of_birth: pastDateString.optional(),
+  date_of_birth: adultDobString.optional(), // ← was pastDateString
   gender: GenderEnum.optional(),
   marital_status: MaritalStatusEnum.optional(),
   citizenship_number: z.string().optional(),
@@ -121,7 +129,6 @@ export const createDepartmentSchema = z.object({
 });
 
 export const updateDepartmentSchema = createDepartmentSchema.partial().extend({
-  // Allow passing the dept id so the controller can target the right row
   id: uuidString.optional(),
 });
 
@@ -138,25 +145,18 @@ export const createBankDetailSchema = z.object({
 export const updateBankDetailSchema = createBankDetailSchema.partial();
 
 // ─── Employee — CREATE ────────────────────────────────────────────────────────
-// The create endpoint still accepts flat fields (legacy form) so we keep it
-// flat and let the controller map them to the right sub-tables.
 
 export const createEmployeeSchema = z.object({
-  // Required
   email: z.string().email("Invalid email"),
   first_name: z.string().min(1, "First name is required"),
   last_name: z.string().min(1, "Last name is required"),
   department_name: z.string().min(1, "Department is required"),
   joining_date: dateString,
-
-  // Employee record
   employee_id: z.string().optional(),
   manager_id: uuidString.optional(),
   notes: z.string().optional(),
-
-  // Personal detail fields (flat)
   phone: z.string().nullable().optional(),
-  date_of_birth: pastDateString.optional(),
+  date_of_birth: adultDobString.optional(), // ← was pastDateString
   gender: GenderEnum.optional(),
   marital_status: MaritalStatusEnum.optional(),
   citizenship_number: z.string().optional(),
@@ -175,16 +175,12 @@ export const createEmployeeSchema = z.object({
   municipality: MunicipalityTypeEnum.optional(),
   ward: z.number().int().positive().optional(),
   tole: z.string().optional(),
-
-  // Department fields (flat)
   hierarchy: z.string().optional(),
   previous_experience: z.string().optional(),
   employment_type: z.string().optional(),
   employment_status: z.string().optional(),
   designation: z.string().optional(),
   level: z.string().optional(),
-
-  // Bank detail fields (flat, all optional on create)
   salary: decimalNumber.optional(),
   account_number: z.string().optional(),
   bank_name: z.string().optional(),
@@ -193,25 +189,20 @@ export const createEmployeeSchema = z.object({
 });
 
 // ─── Employee — UPDATE ────────────────────────────────────────────────────────
-// Strictly nested — the frontend MUST send one of these keys.
-// Flat fields at the top level are rejected to prevent ambiguity.
 
 export const updateEmployeeSchema = z
   .object({
-    // Employee-level fields
     profile_image: z.string().url("Invalid URL").optional(),
     notes: z.string().optional(),
     manager_id: uuidString.optional(),
     employee_verified: z.boolean().optional(),
     verification_pending: z.boolean().optional(),
     is_active: z.boolean().optional(),
-
-    // Strictly nested sub-documents
     personal_details: updatePersonalDetailSchema.optional(),
     department: updateDepartmentSchema.optional(),
     bank_details: updateBankDetailSchema.optional(),
   })
-  .strict(); // ← rejects any unknown top-level keys (prevents flat-field bleed)
+  .strict();
 
 // ─── Emergency Contact ────────────────────────────────────────────────────────
 
@@ -243,8 +234,8 @@ export const updateEmployeeDocumentSchema =
 export const createAttendanceSchema = z.object({
   employee_id: uuidString,
   date: dateString,
-  check_in: z.string().optional(), // HH:MM:SS
-  check_out: z.string().optional(), // HH:MM:SS
+  check_in: z.string().optional(),
+  check_out: z.string().optional(),
   status: AttendanceStatusEnum,
   notes: z.string().optional(),
 });
@@ -350,55 +341,44 @@ export const createReportSchema = z.object({
   filters: z.record(z.string(), z.unknown()).optional(),
 });
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
 export type CreateUserBody = z.infer<typeof createUserSchema>;
 export type UpdateUserBody = z.infer<typeof updateUserSchema>;
-
 export type CreatePersonalDetailBody = z.infer<
   typeof createPersonalDetailSchema
 >;
 export type UpdatePersonalDetailBody = z.infer<
   typeof updatePersonalDetailSchema
 >;
-
 export type CreateDepartmentBody = z.infer<typeof createDepartmentSchema>;
 export type UpdateDepartmentBody = z.infer<typeof updateDepartmentSchema>;
-
 export type CreateBankDetailBody = z.infer<typeof createBankDetailSchema>;
 export type UpdateBankDetailBody = z.infer<typeof updateBankDetailSchema>;
-
 export type CreateEmployeeBody = z.infer<typeof createEmployeeSchema>;
 export type UpdateEmployeeBody = z.infer<typeof updateEmployeeSchema>;
-
 export type CreateEmergencyContactBody = z.infer<
   typeof createEmergencyContactSchema
 >;
 export type UpdateEmergencyContactBody = z.infer<
   typeof updateEmergencyContactSchema
 >;
-
 export type CreateEmployeeDocumentBody = z.infer<
   typeof createEmployeeDocumentSchema
 >;
 export type UpdateEmployeeDocumentBody = z.infer<
   typeof updateEmployeeDocumentSchema
 >;
-
 export type CreateAttendanceBody = z.infer<typeof createAttendanceSchema>;
 export type UpdateAttendanceBody = z.infer<typeof updateAttendanceSchema>;
-
 export type CreateLeaveBody = z.infer<typeof createLeaveSchema>;
 export type UpdateLeaveBody = z.infer<typeof updateLeaveSchema>;
-
 export type CreatePayrollBody = z.infer<typeof createPayrollSchema>;
 export type UpdatePayrollBody = z.infer<typeof updatePayrollSchema>;
-
 export type CreateAssetBody = z.infer<typeof createAssetSchema>;
 export type UpdateAssetBody = z.infer<typeof updateAssetSchema>;
-
 export type CreateHolidayBody = z.infer<typeof createHolidaySchema>;
 export type UpdateHolidayBody = z.infer<typeof updateHolidaySchema>;
-
 export type CreateLeavePolicyBody = z.infer<typeof createLeavePolicySchema>;
 export type UpdateLeavePolicyBody = z.infer<typeof updateLeavePolicySchema>;
-
 export type CreateReportBody = z.infer<typeof createReportSchema>;
