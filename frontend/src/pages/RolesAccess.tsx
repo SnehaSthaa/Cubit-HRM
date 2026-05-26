@@ -1,18 +1,16 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import {
   Shield,
   Users,
-  Edit2,
   Check,
-  X,
   Crown,
   UserCog,
   User,
   ChevronDown,
   ChevronUp,
-  Plus,
-  Trash2,
+  Delete,
+  Trash,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -30,10 +28,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useRole } from "@/contexts/RoleContext";
 import { useToast } from "@/hooks/use-toast";
+import { apiClient } from "@/services/apiClient";
+import Dashboard from "./Dashboard";
+import { useNavigate } from "react-router-dom";
 
 const item = { hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0 } };
 const container = {
@@ -56,43 +56,37 @@ const ALL_MODULES = [
 
 type Module = (typeof ALL_MODULES)[number];
 type Permission = "view" | "create" | "edit" | "delete";
-
 const ALL_PERMISSIONS: Permission[] = ["view", "create", "edit", "delete"];
 
 interface RolePermissions {
   [module: string]: Permission[];
 }
-
 interface RoleDef {
   id: string;
   name: string;
   description: string;
   icon: typeof Shield;
-  maxUsers: number | null; // null = unlimited
+  maxUsers: number | null;
   permissions: RolePermissions;
-  locked: boolean; // super_admin is locked
+  locked: boolean;
 }
-
 interface UserAssignment {
   id: string;
   name: string;
   email: string;
-  role: string;
+  roles: string[];
 }
 
-const defaultRoles: RoleDef[] = [
-  {
+const ROLE_META: Record<string, Omit<RoleDef, "permissions">> = {
+  super_admin: {
     id: "super_admin",
     name: "Super Admin",
     description: "Full system access. Only one Super Admin allowed.",
     icon: Crown,
     maxUsers: 1,
     locked: true,
-    permissions: Object.fromEntries(
-      ALL_MODULES.map((m) => [m, [...ALL_PERMISSIONS]]),
-    ),
   },
-  {
+  hr_admin: {
     id: "hr_admin",
     name: "HR / Admin",
     description:
@@ -100,20 +94,8 @@ const defaultRoles: RoleDef[] = [
     icon: UserCog,
     maxUsers: null,
     locked: false,
-    permissions: {
-      Dashboard: ["view"],
-      Employees: ["view", "create", "edit", "delete"],
-      Attendance: ["view", "create", "edit"],
-      "Leave Management": ["view", "create", "edit", "delete"],
-      Payroll: ["view", "create", "edit"],
-      Assets: ["view", "create", "edit", "delete"],
-      Offboarding: ["view", "create", "edit"],
-      Reports: ["view"],
-      "Roles & Access": ["view"],
-      "Employee Self-Service": ["view", "edit"],
-    },
   },
-  {
+  employee: {
     id: "employee",
     name: "Employee",
     description:
@@ -121,64 +103,121 @@ const defaultRoles: RoleDef[] = [
     icon: User,
     maxUsers: null,
     locked: false,
-    permissions: {
-      Dashboard: ["view"],
-      Employees: [],
-      Attendance: ["view"],
-      "Leave Management": ["view", "create"],
-      Payroll: ["view"],
-      Assets: ["view", "create"],
-      Offboarding: [],
-      Reports: [],
-      "Roles & Access": [],
-      "Employee Self-Service": ["view", "edit"],
-    },
   },
-];
-
-const mockUsers: UserAssignment[] = [
-  {
-    id: "1",
-    name: "Rajesh Sharma",
-    email: "rajesh@cubit.io",
-    role: "super_admin",
-  },
-  { id: "2", name: "Sita Thapa", email: "sita@cubit.io", role: "hr_admin" },
-  { id: "3", name: "Binod KC", email: "binod@cubit.io", role: "hr_admin" },
-  { id: "4", name: "Priya Gurung", email: "priya@cubit.io", role: "hr_admin" },
-  {
-    id: "5",
-    name: "Aarav Bhandari",
-    email: "aarav@cubit.io",
-    role: "employee",
-  },
-  { id: "6", name: "Deepa Rai", email: "deepa@cubit.io", role: "employee" },
-  { id: "7", name: "Sunil Tamang", email: "sunil@cubit.io", role: "employee" },
-  {
-    id: "8",
-    name: "Anita Shrestha",
-    email: "anita@cubit.io",
-    role: "employee",
-  },
-  {
-    id: "9",
-    name: "Ramesh Adhikari",
-    email: "ramesh@cubit.io",
-    role: "employee",
-  },
-];
+};
 
 export default function RolesAccess() {
   const { isAdmin } = useRole();
   const { toast } = useToast();
-  const [roles, setRoles] = useState<RoleDef[]>(defaultRoles);
-  const [users, setUsers] = useState<UserAssignment[]>(mockUsers);
-  const [editingRole, setEditingRole] = useState<RoleDef | null>(null);
+
+  const [roles, setRoles] = useState<RoleDef[]>([]);
+  const [users, setUsers] = useState<UserAssignment[]>([]);
+  const [loading, setLoading] = useState(true);
   const [expandedRole, setExpandedRole] = useState<string | null>(null);
   const [assignDialog, setAssignDialog] = useState(false);
   const [assignUserId, setAssignUserId] = useState("");
   const [assignRoleId, setAssignRoleId] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [removingRole, setRemovingRole] = useState(false);
 
+  const fetchData = useCallback(async () => {
+    try {
+      setLoading(true);
+      const res = await apiClient.getEmployees();
+      const employees = Array.isArray(res.data) ? res.data : [];
+
+      const mapped: UserAssignment[] = employees.map((e) => ({
+        id: e.user?.id,
+        name: `${e.first_name} ${e.last_name}`.trim(),
+        email: e.email,
+        roles: Array.isArray(e.user?.role)
+          ? e.user.role
+          : [e.user?.role ?? "employee"],
+      }));
+      setUsers(mapped);
+      const roleIds = Object.keys(ROLE_META);
+
+      const permResults = await Promise.all(
+        roleIds.map((roleId) =>
+          apiClient.getPermissionByRole(roleId).then((r) => ({
+            roleId,
+            permissions: r.data as Record<string, Record<string, boolean>>,
+          })),
+        ),
+      );
+
+      const moduleKeyMap: Record<string, [Module, string]> = {
+        dashboard: ["Dashboard", "dashboard"],
+        employee: ["Employees", "employee"],
+        attendance: ["Attendance", "attendance"],
+        leave_management: ["Leave Management", "leavemanagement"],
+        payroll: ["Payroll", "payroll"],
+        assets: ["Assets", "assets"],
+        offboarding: ["Offboarding", "offboarding"],
+        reports: ["Reports", "reports"],
+        roles_and_access: ["Roles & Access", "rolesandaccess"],
+        Employee_self_service: ["Employee Self-Service", "employeeselfservice"],
+      };
+
+      const roleDefs: RoleDef[] = permResults.map(({ roleId, permissions }) => {
+        const rolePermissions: RolePermissions = {};
+        for (const [moduleKey, [label, prefix]] of Object.entries(
+          moduleKeyMap,
+        )) {
+          const modulePerms = permissions[moduleKey] ?? {};
+          rolePermissions[label] = ALL_PERMISSIONS.filter(
+            (p) => modulePerms[`${prefix}.${p}`] === true,
+          );
+        }
+        return { ...ROLE_META[roleId], permissions: rolePermissions };
+      });
+      setRoles(roleDefs);
+    } catch (err) {
+      console.error("Failed to fetch roles data", err);
+      toast({ title: "Failed to load data", variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  }, [toast]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  const handleSavePermission = async (role: RoleDef) => {
+    try {
+      const moduleKeyMap: Record<string, [string, string]> = {
+        Dashboard: ["dashboard", "dashboard"],
+        Employees: ["employee", "employee"],
+        Attendance: ["attendance", "attendance"],
+        "Leave Management": ["leave_management", "leavemanagement"],
+        Payroll: ["payroll", "payroll"],
+        Assets: ["assets", "assets"],
+        Offboarding: ["offboarding", "offboarding"],
+        Reports: ["reports", "reports"],
+        "Roles & Access": ["roles_and_access", "rolesandaccess"],
+        "Employee Self-Service": [
+          "Employee_self_service",
+          "employeeselfservice",
+        ],
+      };
+      const permissions: Record<string, Record<string, boolean>> = {};
+      for (const [label, [moduleKey, prefix]] of Object.entries(moduleKeyMap)) {
+        const granted = role.permissions[label] ?? [];
+        permissions[moduleKey] = Object.fromEntries(
+          ALL_PERMISSIONS.map((p) => [`${prefix}.${p}`, granted.includes(p)]),
+        );
+      }
+      await apiClient.updatePermissionByRole(role.id, permissions);
+      toast({ title: "Permission Saved" });
+      setExpandedRole(null);
+    } catch (err) {
+      toast({
+        title: "Failed to save permissions",
+        variant: "destructive",
+      });
+    }
+  };
   const togglePermission = (
     roleId: string,
     module: string,
@@ -189,59 +228,78 @@ export default function RolesAccess() {
         if (r.id !== roleId || r.locked) return r;
         const current = r.permissions[module] || [];
         const has = current.includes(perm);
-        // If removing "view", remove all permissions for that module
         if (perm === "view" && has) {
           return { ...r, permissions: { ...r.permissions, [module]: [] } };
         }
-        // If adding create/edit/delete, ensure "view" is also added
         const updated = has
           ? current.filter((p) => p !== perm)
           : [...current, perm];
-        if (!has && perm !== "view" && !updated.includes("view")) {
+        if (!has && perm !== "view" && !updated.includes("view"))
           updated.push("view");
-        }
         return { ...r, permissions: { ...r.permissions, [module]: updated } };
       }),
     );
   };
 
-  const getUserCount = (roleId: string) =>
-    users.filter((u) => u.role === roleId).length;
+  const getUsersForRole = (roleId: string) =>
+    users.filter((u) => u.roles.includes(roleId));
 
-  const handleAssignRole = () => {
+  const handleAssignRole = async () => {
     if (!assignUserId || !assignRoleId) return;
-    const targetRole = roles.find((r) => r.id === assignRoleId);
-    if (
-      targetRole?.maxUsers &&
-      getUserCount(assignRoleId) >= targetRole.maxUsers
-    ) {
+    try {
+      setSaving(true);
+      await apiClient.assignRole(assignUserId, assignRoleId);
+      await fetchData();
       toast({
-        title: "Cannot assign",
-        description: `${targetRole.name} is limited to ${targetRole.maxUsers} user(s).`,
+        title: "Role assigned",
+        description: "User role has been updated",
+      });
+      setAssignDialog(false);
+      setAssignUserId("");
+      setAssignRoleId("");
+    } catch (err) {
+      toast({
+        title: "Failed to assign role",
+        variant: "destructive",
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleRemoveRole = async (userId: string, roleId: string) => {
+    const user = users.find((u) => u.id === userId);
+    if (!user) return;
+    if (user.roles.length <= 1) {
+      toast({
+        title: "Cannot remove",
+        description: "User must have at least one role.",
         variant: "destructive",
       });
       return;
     }
-    setUsers((prev) =>
-      prev.map((u) =>
-        u.id === assignUserId ? { ...u, role: assignRoleId } : u,
-      ),
-    );
-    toast({
-      title: "Role updated",
-      description: "User role has been reassigned.",
-    });
-    setAssignDialog(false);
-    setAssignUserId("");
-    setAssignRoleId("");
+    try {
+      setRemovingRole(true);
+      await apiClient.removeRole(user.id, roleId);
+      await fetchData();
+      toast({ title: "Role removed" });
+    } catch (err) {
+      toast({
+        title: "Failed to remove role",
+        variant: "destructive",
+      });
+    } finally {
+      setRemovingRole(false);
+    }
   };
 
-  const savePermissions = (roleId: string) => {
-    toast({
-      title: "Permissions saved",
-      description: `Permissions for role updated successfully.`,
-    });
-  };
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   return (
     <motion.div
@@ -264,12 +322,10 @@ export default function RolesAccess() {
         )}
       </motion.div>
 
-      {/* Role Cards */}
       <motion.div variants={item} className="space-y-3">
         {roles.map((role) => {
           const isExpanded = expandedRole === role.id;
-          const userCount = getUserCount(role.id);
-          const roleUsers = users.filter((u) => u.role === role.id);
+          const roleUsers = getUsersForRole(role.id);
           const Icon = role.icon;
 
           return (
@@ -277,7 +333,6 @@ export default function RolesAccess() {
               key={role.id}
               className="bg-card border border-border rounded-lg overflow-hidden"
             >
-              {/* Header */}
               <div
                 className="flex items-center justify-between p-4 cursor-pointer hover:bg-muted/30 transition-colors"
                 onClick={() => setExpandedRole(isExpanded ? null : role.id)}
@@ -307,7 +362,7 @@ export default function RolesAccess() {
                 </div>
                 <div className="flex items-center gap-3">
                   <span className="text-xs text-muted-foreground flex items-center gap-1">
-                    <Users className="w-3 h-3" /> {userCount}
+                    <Users className="w-3 h-3" /> {roleUsers.length}
                   </span>
                   {isExpanded ? (
                     <ChevronUp className="w-4 h-4 text-muted-foreground" />
@@ -317,7 +372,6 @@ export default function RolesAccess() {
                 </div>
               </div>
 
-              {/* Expanded Content */}
               {isExpanded && (
                 <div className="border-t border-border">
                   {/* Permission Matrix */}
@@ -331,7 +385,7 @@ export default function RolesAccess() {
                           size="sm"
                           variant="outline"
                           className="h-7 text-xs"
-                          onClick={() => savePermissions(role.id)}
+                          onClick={() => handleSavePermission(role)}
                         >
                           <Check className="w-3 h-3 mr-1" /> Save Changes
                         </Button>
@@ -391,7 +445,7 @@ export default function RolesAccess() {
                   {/* Assigned Users */}
                   <div className="border-t border-border p-4">
                     <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-                      Assigned Users ({userCount})
+                      Assigned Users ({roleUsers.length})
                     </h4>
                     {roleUsers.length === 0 ? (
                       <p className="text-xs text-muted-foreground italic">
@@ -414,6 +468,14 @@ export default function RolesAccess() {
                             <span className="text-muted-foreground">
                               {u.email}
                             </span>
+                            {isAdmin && !role.locked && u.roles.length > 1 && (
+                              <button
+                                className="text-muted-foreground hover:text-destructive transition-colors ml-1"
+                                onClick={() => handleRemoveRole(u.id, role.id)}
+                              >
+                                <Trash className="h-3" />
+                              </button>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -444,7 +506,7 @@ export default function RolesAccess() {
                     <SelectItem key={u.id} value={u.id}>
                       {u.name} —{" "}
                       <span className="text-muted-foreground">
-                        {roles.find((r) => r.id === u.role)?.name}
+                        {u.roles.join(", ")}
                       </span>
                     </SelectItem>
                   ))}
@@ -463,11 +525,12 @@ export default function RolesAccess() {
                       key={r.id}
                       value={r.id}
                       disabled={
-                        r.maxUsers !== null && getUserCount(r.id) >= r.maxUsers
+                        r.maxUsers !== null &&
+                        getUsersForRole(r.id).length >= r.maxUsers
                       }
                     >
                       {r.name}{" "}
-                      {r.maxUsers === 1 && getUserCount(r.id) >= 1
+                      {r.maxUsers === 1 && getUsersForRole(r.id).length >= 1
                         ? "(Full)"
                         : ""}
                     </SelectItem>
@@ -475,13 +538,6 @@ export default function RolesAccess() {
                 </SelectContent>
               </Select>
             </div>
-            {assignRoleId === "super_admin" &&
-              getUserCount("super_admin") >= 1 && (
-                <p className="text-xs text-destructive">
-                  Super Admin is limited to 1 user. The current Super Admin must
-                  be reassigned first.
-                </p>
-              )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setAssignDialog(false)}>
@@ -489,9 +545,9 @@ export default function RolesAccess() {
             </Button>
             <Button
               onClick={handleAssignRole}
-              disabled={!assignUserId || !assignRoleId}
+              disabled={!assignUserId || !assignRoleId || saving}
             >
-              Assign
+              {saving ? "Assigning..." : "Assign"}
             </Button>
           </DialogFooter>
         </DialogContent>

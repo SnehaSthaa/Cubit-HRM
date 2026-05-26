@@ -22,6 +22,12 @@ router.get(
   hasRequiredPermission([LeaveManagementAction.View]),
   LeaveController.getAll,
 );
+router.get(
+  "/export",
+  authorize("super_admin", "hr_admin"),
+  hasRequiredPermission([LeaveManagementAction.Edit]),
+  LeaveController.exportLeaves,
+);
 
 router.post(
   "/",
@@ -30,11 +36,6 @@ router.post(
   validate(createLeaveSchema),
   LeaveController.create,
 );
-
-// ─── /balance routes — most specific FIRST, param route LAST ─────────────────
-// IMPORTANT: /balance/customize must come before /balance/:employee_id,
-// otherwise Express treats the string "customize" as the :employee_id value
-// and this route is never reached.
 
 router.patch(
   "/balance/customize",

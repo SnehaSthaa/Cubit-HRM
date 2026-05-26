@@ -156,7 +156,8 @@ export interface Report {
 export interface JwtPayload {
   userId: string;
   email: string;
-  role: UserRole;
+  role: UserRole[];
+  activeRole: UserRole;
   employeeId?: string;
 }
 

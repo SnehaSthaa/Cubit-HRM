@@ -39,6 +39,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Employee, LeaveBalance } from "@/types";
 import { apiClient, LeavePolicyApi } from "@/services/apiClient";
 import { leaveTypeIcons } from "./EmployeeProfile";
+import { usePending } from "@/contexts/PendingContext";
 
 const item = { hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0 } };
 const container = {
@@ -176,6 +177,7 @@ const mapPolicy = (p: LeavePolicyApi): LeavePolicy => ({
 });
 
 export default function LeaveManagement() {
+  const { setPending, clearPending } = usePending();
   const { isHR } = useRole();
   const { toast } = useToast();
 
@@ -214,9 +216,14 @@ export default function LeaveManagement() {
     end_date: "",
     holiday_type: "public" as Holiday["holiday_type"],
   });
+
   const [sortEmployeeName, setSortEmployeeName] = useState<
     "asc" | "desc" | null
   >(null);
+  const [sortLeaveType, setSortLeaveType] = useState<{
+    policyId: string;
+    dir: "asc" | "desc";
+  } | null>(null);
 
   const [overrides, setOverrides] = useState<LeaveOverride[]>([]);
   const [overrideDialog, setOverrideDialog] = useState(false);
@@ -255,19 +262,24 @@ export default function LeaveManagement() {
     to: "",
     reason: "",
   });
-  const [debugJoinDate, setDebugJoinDate] = useState("");
-  const [debugQuota, setDebugQuota] = useState(12);
-  const [debugResult, setDebugResult] = useState<
-    { month: string; accrued: number }[] | null
-  >(null);
-  const [debugLoading, setDebugLoading] = useState(false);
-  const [debugNextYear, setDebugNextYear] = useState<{
-    month: string;
-    accrued: number;
-  } | null>(null);
+  const [filterMonth, setFilterMonth] = useState<string>("all");
+  const [filterLeaveType, setFilterLeaveType] = useState<string>("all");
+  const [filterEmployee, setFilterEmployee] = useState<string>("all");
   const [applyForEmployee, setApplyForEmployee] = useState(false);
 
   const leaveTypes = policies.filter((p) => p.active).map((p) => p.name);
+  const filterRequests = useMemo(() => {
+    return requests.filter((req) => {
+      const monthMatch =
+        filterMonth === "all" ||
+        new Date(req.from).getMonth() === parseInt(filterMonth);
+      const typeMatch =
+        filterLeaveType === "all" || req.type === filterLeaveType;
+      const empMatch =
+        filterEmployee === "all" || req.employee === filterEmployee;
+      return monthMatch && typeMatch && empMatch;
+    });
+  }, [requests, filterMonth, filterLeaveType, filterEmployee]);
 
   const fetchEmployees = useCallback(async () => {
     if (!isHR) return;
@@ -327,6 +339,7 @@ export default function LeaveManagement() {
               : "",
         };
       });
+
       setRequests(mapped);
     } catch (err) {
       console.error("Failed to fetch leaves", err);
@@ -467,7 +480,7 @@ export default function LeaveManagement() {
   }, [employees, activePolicies, allBalances]);
 
   const sortedEmployeeBalances = useMemo(() => {
-    return [...employeeBalances].sort((a, b) => {
+    const sorted = [...employeeBalances].sort((a, b) => {
       if (!sortEmployeeName) return 0;
       const nameA =
         `${a.employee.first_name} ${a.employee.last_name}`.toLowerCase();
@@ -477,7 +490,17 @@ export default function LeaveManagement() {
         ? nameA.localeCompare(nameB)
         : nameB.localeCompare(nameA);
     });
-  }, [employeeBalances, sortEmployeeName]);
+
+    if (!sortLeaveType) return sorted;
+
+    return [...sorted].sort((a, b) => {
+      const aType = a.types.find((t) => t.policyId === sortLeaveType.policyId);
+      const bType = b.types.find((t) => t.policyId === sortLeaveType.policyId);
+      const aVal = aType?.remaining ?? 0;
+      const bVal = bType?.remaining ?? 0;
+      return sortLeaveType.dir === "asc" ? aVal - bVal : bVal - aVal;
+    });
+  }, [employeeBalances, sortEmployeeName, sortLeaveType]);
   const eligibleEmployeeIds = new Set(
     employees
       .filter(
@@ -643,6 +666,24 @@ export default function LeaveManagement() {
       toast({ title: "Leave request deleted" });
     } catch {
       toast({ title: "Error", description: "Failed to delete leave." });
+    }
+  };
+  const handleExportLeaves = async () => {
+    try {
+      const res = await apiClient.exportLeaves({
+        month: filterMonth,
+        leave_type: filterLeaveType,
+        employee: filterEmployee,
+      });
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", "leave-requests.xlsx");
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch (err) {
+      toast({ title: "Export failed", variant: "destructive" });
     }
   };
 
@@ -1294,9 +1335,188 @@ export default function LeaveManagement() {
               <TabsContent value="requests" className="mt-4">
                 <div className="grid grid-cols-3 gap-4">
                   <div className="col-span-2 bg-card border border-border rounded-lg overflow-hidden">
-                    <div className="px-4 py-3 border-b border-border">
-                      <h2 className="text-sm font-medium">Recent Requests</h2>
+                    <div className="px-4 py-3 border-b border-border space-y-3">
+                      <div className="flex items-center justify-between">
+                        <h2 className="text-sm font-medium">
+                          Recent Requests
+                          {filterRequests.length !== requests.length && (
+                            <span className="ml-2 text-xs text-muted-foreground font-normal">
+                              {filterRequests.length} of {requests.length}
+                            </span>
+                          )}
+                        </h2>
+                        <div className="flex items-center gap-2">
+                          {isHR && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 px-2.5 text-xs gap-1.5"
+                              onClick={handleExportLeaves}
+                              disabled={filterRequests.length === 0}
+                            >
+                              <svg
+                                className="w-3.5 h-3.5"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                              >
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                <polyline points="7 10 12 15 17 10" />
+                                <line x1="12" y1="15" x2="12" y2="3" />
+                              </svg>
+                              Export Excel
+                            </Button>
+                          )}
+                          {(filterMonth !== "all" ||
+                            filterLeaveType !== "all" ||
+                            filterEmployee !== "all") && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFilterMonth("all");
+                                setFilterLeaveType("all");
+                                setFilterEmployee("all");
+                              }}
+                              className="flex items-center gap-1 h-7 px-2.5 text-xs text-muted-foreground hover:text-foreground border border-border rounded-md hover:bg-muted/50 transition-colors"
+                            >
+                              <span>Clear filters</span>
+                              <span className="w-3.5 h-3.5 rounded-full bg-muted-foreground/20 flex items-center justify-center text-[10px] leading-none">
+                                ✕
+                              </span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {/* Month */}
+                        <Select
+                          value={filterMonth}
+                          onValueChange={setFilterMonth}
+                        >
+                          <SelectTrigger className="h-7 text-xs w-32 bg-muted/40 border-border/60">
+                            <SelectValue placeholder="All Months" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All Months</SelectItem>
+                            {[
+                              "January",
+                              "February",
+                              "March",
+                              "April",
+                              "May",
+                              "June",
+                              "July",
+                              "August",
+                              "September",
+                              "October",
+                              "November",
+                              "December",
+                            ].map((m, i) => (
+                              <SelectItem key={i} value={String(i)}>
+                                {m}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+
+                        {/* Leave Type */}
+                        <Select
+                          value={filterLeaveType}
+                          onValueChange={setFilterLeaveType}
+                        >
+                          <SelectTrigger className="h-7 text-xs w-36 bg-muted/40 border-border/60">
+                            <SelectValue placeholder="All Leave Types" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All Leave Types</SelectItem>
+                            {[...new Set(requests.map((r) => r.type))].map(
+                              (t) => (
+                                <SelectItem key={t} value={t}>
+                                  {t}
+                                </SelectItem>
+                              ),
+                            )}
+                          </SelectContent>
+                        </Select>
+
+                        {/* Employee (HR only) */}
+                        {isHR && (
+                          <Select
+                            value={filterEmployee}
+                            onValueChange={setFilterEmployee}
+                          >
+                            <SelectTrigger className="h-7 text-xs w-40 bg-muted/40 border-border/60">
+                              <SelectValue placeholder="All Employees" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All Employees</SelectItem>
+                              {[...new Set(requests.map((r) => r.employee))]
+                                .sort()
+                                .map((e) => (
+                                  <SelectItem key={e} value={e}>
+                                    {e}
+                                  </SelectItem>
+                                ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+
+                        {/* Active filter pills */}
+                        {filterMonth !== "all" && (
+                          <span className="inline-flex items-center gap-1 h-7 px-2 text-xs rounded-md bg-primary/10 text-primary border border-primary/20">
+                            {
+                              [
+                                "Jan",
+                                "Feb",
+                                "Mar",
+                                "Apr",
+                                "May",
+                                "Jun",
+                                "Jul",
+                                "Aug",
+                                "Sep",
+                                "Oct",
+                                "Nov",
+                                "Dec",
+                              ][parseInt(filterMonth)]
+                            }
+                            <button
+                              type="button"
+                              onClick={() => setFilterMonth("all")}
+                              className="hover:text-primary/70 leading-none"
+                            >
+                              ✕
+                            </button>
+                          </span>
+                        )}
+                        {filterLeaveType !== "all" && (
+                          <span className="inline-flex items-center gap-1 h-7 px-2 text-xs rounded-md bg-primary/10 text-primary border border-primary/20">
+                            {filterLeaveType}
+                            <button
+                              type="button"
+                              onClick={() => setFilterLeaveType("all")}
+                              className="hover:text-primary/70 leading-none"
+                            >
+                              ✕
+                            </button>
+                          </span>
+                        )}
+                        {filterEmployee !== "all" && (
+                          <span className="inline-flex items-center gap-1 h-7 px-2 text-xs rounded-md bg-primary/10 text-primary border border-primary/20">
+                            {filterEmployee}
+                            <button
+                              type="button"
+                              onClick={() => setFilterEmployee("all")}
+                              className="hover:text-primary/70 leading-none"
+                            >
+                              ✕
+                            </button>
+                          </span>
+                        )}
+                      </div>
                     </div>
+
                     <table className="nexus-table">
                       <thead>
                         <tr>
@@ -1310,7 +1530,7 @@ export default function LeaveManagement() {
                         </tr>
                       </thead>
                       <tbody>
-                        {requests.length === 0 ? (
+                        {filterRequests.length === 0 ? (
                           <tr>
                             <td
                               colSpan={7}
@@ -1320,7 +1540,7 @@ export default function LeaveManagement() {
                             </td>
                           </tr>
                         ) : (
-                          requests.map((req) => (
+                          filterRequests.map((req) => (
                             <tr
                               key={req.id}
                               className="cursor-pointer"
@@ -1410,13 +1630,17 @@ export default function LeaveManagement() {
                                   .toLocaleDateString("en", { month: "short" })
                                   .toUpperCase()}
                               </span>
-                              <span className="text-[12px]">
-                                {new Date(h.start_date).toLocaleDateString(
-                                  "en",
-                                  { day: "numeric" },
-                                )}
-                                {h.start_date !== h.end_date &&
-                                  ` - ${new Date(h.end_date).toLocaleDateString("en", { day: "numeric" })}`}
+                              <span className="text-[12px] flex flex-row items-center">
+                                <span>
+                                  {new Date(h.start_date).toLocaleDateString(
+                                    "en",
+                                    { day: "numeric" },
+                                  )}
+                                </span>
+                                <span>
+                                  {h.start_date !== h.end_date &&
+                                    ` - ${new Date(h.end_date).toLocaleDateString("en", { day: "numeric" })}`}
+                                </span>
                               </span>
                             </div>
                             <div className="flex-1 min-w-0">
@@ -2182,8 +2406,34 @@ export default function LeaveManagement() {
                                   key={p.id}
                                   className="text-center min-w-[110px]"
                                 >
-                                  <div className="flex flex-col items-center gap-0.5">
-                                    <span>{p.name}</span>
+                                  <button
+                                    type="button"
+                                    className="inline-flex flex-col items-center gap-0.5 w-full hover:text-foreground transition-colors"
+                                    onClick={() =>
+                                      setSortLeaveType((prev) => {
+                                        if (prev?.policyId !== p.id)
+                                          return { policyId: p.id, dir: "asc" };
+                                        if (prev.dir === "asc")
+                                          return {
+                                            policyId: p.id,
+                                            dir: "desc",
+                                          };
+                                        return null;
+                                      })
+                                    }
+                                  >
+                                    <span className="flex items-center gap-1">
+                                      {p.name}
+                                      {sortLeaveType?.policyId === p.id ? (
+                                        sortLeaveType.dir === "asc" ? (
+                                          <ArrowUp className="w-3 h-4 text-primary" />
+                                        ) : (
+                                          <ArrowDown className="w-3 h-4 text-primary" />
+                                        )
+                                      ) : (
+                                        <ArrowUpDown className="w-3 h-4 text-muted-foreground opacity-40" />
+                                      )}
+                                    </span>
                                     <div className="flex items-center gap-1">
                                       {p.proRata && (
                                         <span className="text-[9px] px-1 py-0.5 rounded bg-blue-100 text-blue-600 dark:bg-blue-950 dark:text-blue-400 font-medium leading-none">
@@ -2196,7 +2446,7 @@ export default function LeaveManagement() {
                                           : `${p.annualQuota}d`}
                                       </span>
                                     </div>
-                                  </div>
+                                  </button>
                                 </th>
                               ))}
                             </tr>

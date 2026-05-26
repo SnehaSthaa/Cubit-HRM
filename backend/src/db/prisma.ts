@@ -18,7 +18,7 @@ try {
   console.log(" Prisma client created successfully");
 } catch (err) {
   console.error(" Prisma client FAILED to initialize:", err);
-  process.exit(1); // crash loudly so we can see the error
+  process.exit(1);
 }
 
 const globalForPrisma = globalThis as unknown as {

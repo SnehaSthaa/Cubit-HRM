@@ -47,114 +47,106 @@ const App = () => {
     </ProtectedRoute>
   );
 
-  const router = createBrowserRouter(
-    [
-      { path: "/login", element: <Login /> },
-      { path: "/signup", element: <Signup /> },
-      { path: "/forgot-password", element: <ForgotPassword /> },
-      {
-        path: "/",
-        element: protectedLayout,
-        children: [
-          {
-            index: true,
-            element: (
-              <ProtectedRoute action={DashboardAction.View}>
-                <Dashboard />
-              </ProtectedRoute>
-            ),
-          },
-          {
-            path: "employees",
-            element: (
-              <ProtectedRoute action={EmployeesAction.View}>
-                <EmployeeList />
-              </ProtectedRoute>
-            ),
-          },
-          {
-            path: "employees/:id",
-            element: (
-              <ProtectedRoute action={EmployeesAction.View}>
-                <EmployeeProfile />
-              </ProtectedRoute>
-            ),
-          },
-          {
-            path: "attendance",
-            element: (
-              <ProtectedRoute action={AttendanceAction.View}>
-                <Attendance />
-              </ProtectedRoute>
-            ),
-          },
-          {
-            path: "leave",
-            element: (
-              <ProtectedRoute action={LeaveManagementAction.View}>
-                <LeaveManagement />
-              </ProtectedRoute>
-            ),
-          },
-          {
-            path: "payroll",
-            element: (
-              <ProtectedRoute action={PayrollAction.View}>
-                <Payroll />
-              </ProtectedRoute>
-            ),
-          },
-          {
-            path: "ess",
-            element: (
-              <ProtectedRoute action={EmployeeSelfServiceAction.View}>
-                <EmployeeSelfService />
-              </ProtectedRoute>
-            ),
-          },
-          {
-            path: "offboarding",
-            element: (
-              <ProtectedRoute action={OffboardingAction.View}>
-                <Offboarding />
-              </ProtectedRoute>
-            ),
-          },
-          {
-            path: "reports",
-            element: (
-              <ProtectedRoute action={ReportsAction.View}>
-                <Reports />
-              </ProtectedRoute>
-            ),
-          },
-          {
-            path: "roles",
-            element: (
-              <ProtectedRoute action={RolesandAccessAction.View}>
-                <RolesAccess />
-              </ProtectedRoute>
-            ),
-          },
-          {
-            path: "assets",
-            element: (
-              <ProtectedRoute action={AssetsAction.View}>
-                <AssetManagement />
-              </ProtectedRoute>
-            ),
-          },
-          { path: "*", element: <NotFound /> },
-        ],
-      },
-    ],
+  const router = createBrowserRouter([
+    { path: "/login", element: <Login /> },
+    { path: "/signup", element: <Signup /> },
+    { path: "/forgot-password", element: <ForgotPassword /> },
     {
-      future: {
-        v7_startTransition: true,
-        v7_relativeSplatPath: true,
-      },
+      path: "/",
+      element: protectedLayout,
+      children: [
+        {
+          index: true,
+          element: (
+            <ProtectedRoute action={DashboardAction.View}>
+              <Dashboard />
+            </ProtectedRoute>
+          ),
+        },
+        {
+          path: "employees",
+          element: (
+            <ProtectedRoute action={EmployeesAction.View}>
+              <EmployeeList />
+            </ProtectedRoute>
+          ),
+        },
+        {
+          path: "employees/:id",
+          element: (
+            <ProtectedRoute action={EmployeesAction.View}>
+              <EmployeeProfile />
+            </ProtectedRoute>
+          ),
+        },
+        {
+          path: "attendance",
+          element: (
+            <ProtectedRoute action={AttendanceAction.View}>
+              <Attendance />
+            </ProtectedRoute>
+          ),
+        },
+        {
+          path: "leave",
+          element: (
+            <ProtectedRoute action={LeaveManagementAction.View}>
+              <LeaveManagement />
+            </ProtectedRoute>
+          ),
+        },
+        {
+          path: "payroll",
+          element: (
+            <ProtectedRoute action={PayrollAction.View}>
+              <Payroll />
+            </ProtectedRoute>
+          ),
+        },
+        {
+          path: "ess",
+          element: (
+            <ProtectedRoute action={EmployeeSelfServiceAction.View}>
+              <EmployeeSelfService />
+            </ProtectedRoute>
+          ),
+        },
+        {
+          path: "offboarding",
+          element: (
+            <ProtectedRoute action={OffboardingAction.View}>
+              <Offboarding />
+            </ProtectedRoute>
+          ),
+        },
+        {
+          path: "reports",
+          element: (
+            <ProtectedRoute action={ReportsAction.View}>
+              <Reports />
+            </ProtectedRoute>
+          ),
+        },
+        {
+          path: "roles",
+          element: (
+            <ProtectedRoute action={RolesandAccessAction.View}>
+              <RolesAccess />
+            </ProtectedRoute>
+          ),
+        },
+        {
+          path: "assets",
+          element: (
+            <ProtectedRoute action={AssetsAction.View}>
+              <AssetManagement />
+            </ProtectedRoute>
+          ),
+        },
+        { path: "*", element: <NotFound /> },
+      ],
     },
-  );
+  ]);
 
   return (
     <QueryClientProvider client={queryClient}>

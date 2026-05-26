@@ -1,7 +1,7 @@
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { prisma } from "../db/prisma.js";
-import { JwtPayload } from "../types/index.js";
+import { JwtPayload, UserRole } from "../types/index.js";
 
 export class AuthService {
   static async register(email: string, password: string, name: string) {
@@ -20,7 +20,7 @@ export class AuthService {
         email,
         password_hash,
         name,
-        role: "employee",
+        role: ["employee"],
       },
     });
 
@@ -39,8 +39,6 @@ export class AuthService {
       where: { email: cleanEmail },
     });
 
-    console.log("USER FOUND:", user);
-
     if (!user) throw new Error("Invalid credentials");
 
     const isValidPassword = await bcrypt.compare(password, user.password_hash);
@@ -57,11 +55,13 @@ export class AuthService {
     };
   }
 
-  static generateToken(user: any): string {
+  static generateToken(user: any, activeRole?: string): string {
+    const roles = Array.isArray(user.role) ? user.role : [user.role];
     const payload: JwtPayload = {
       userId: user.id,
       email: user.email,
-      role: user.role,
+      role: roles,
+      activeRole: (activeRole ?? roles[0]) as UserRole,
     };
 
     const secret =

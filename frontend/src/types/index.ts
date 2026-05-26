@@ -28,6 +28,17 @@ export interface Employee {
   department?: string;
   position?: string;
   marital_status?: string;
+  spouse_name?: string;
+  current_state?: string;
+  current_district?: string;
+  current_municipality?: string;
+  current_ward_no?: string;
+  current_tole?: string;
+  permanent_state?: string;
+  permanent_district?: string;
+  permanent_municipality?: string;
+  permanent_ward_no?: string;
+  permanent_tole?: string;
   father_name?: string;
   grandfather_name?: string;
   mother_name?: string;

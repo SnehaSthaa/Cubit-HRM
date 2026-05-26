@@ -2,7 +2,6 @@ import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import { JwtPayload, UserRole } from "../types/index.js";
 import { allPermission } from "@/permissions/allowed-permission.js";
-import { AllowedType } from "@/permissions/permission.js";
 
 declare global {
   namespace Express {
@@ -44,7 +43,12 @@ export const authorize = (...roles: UserRole[]) => {
         .json({ success: false, message: "Not authenticated" });
     }
 
-    if (!roles.includes(req.user.role)) {
+    const userRoles = Array.isArray(req.user.role)
+      ? req.user.role
+      : [req.user.role];
+    const hasRole = userRoles.some((r) => roles.includes(r as UserRole));
+
+    if (!hasRole) {
       return res
         .status(403)
         .json({ success: false, message: "Insufficient permissions" });
@@ -60,32 +64,31 @@ export const hasRequiredPermission = (permissions: string[]) => {
     if (!user) {
       return res.status(401).json({ message: "Unauthorized" });
     }
-    const userRole = user.role;
-    const permissionsForUserRole = allPermission[userRole];
-    //database fetch
-    //user role
-
-    //flattern the permission to the arrary
-    //only extrat string value
-
-    const flatternPermissions = Object.entries(permissionsForUserRole).flatMap(
-      ([module, actions]) =>
-        Object.entries(actions)
-          .filter(([_, value]) => {
-            return !!value;
-          })
-          .map(([key]) => key),
+    const activeRole = user.activeRole;
+    const permsForRole =
+      allPermission[activeRole as keyof typeof allPermission];
+    if (!permsForRole) {
+      return res
+        .status(403)
+        .json({ message: "Forbidden - no permissions found for role" });
+    }
+    const flattenedPermissions = Object.values(permsForRole).flatMap(
+      (actions) =>
+        Object.entries(actions as Record<string, boolean>)
+          .filter(([_, hasPerm]) => hasPerm)
+          .map(([action]) => action),
     );
 
     const hasPermission = permissions.some((perm) =>
-      flatternPermissions.includes(perm),
+      flattenedPermissions.includes(perm),
     );
+
     if (!hasPermission) {
-      return res.status(403).json({
-        success: false,
-        message: "Forbidden-missing permission",
-      });
+      return res
+        .status(403)
+        .json({ success: false, message: "Forbidden-missing permission" });
     }
+
     next();
   };
 };

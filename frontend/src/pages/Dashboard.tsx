@@ -34,7 +34,10 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { Protected } from "@/components/common/ProtectedRoute";
-import { DashboardAction } from "@/permissions/permission";
+import {
+  DashboardAction,
+  LeaveManagementAction,
+} from "@/permissions/permission";
 
 const container = {
   hidden: { opacity: 0 },
@@ -802,9 +805,7 @@ export default function Dashboard() {
 
         {/* Pending Actions */}
 
-        <Protected
-          allPermissions={[DashboardAction.Edit, DashboardAction.Edit]}
-        >
+        <Protected anyPermissions={[LeaveManagementAction.Edit]}>
           <motion.div variants={item} className="glass-card overflow-hidden">
             <div className="flex items-center justify-between px-5 py-4 border-b border-border">
               <h2 className="text-sm font-semibold">Pending Actions</h2>

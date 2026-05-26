@@ -1,6 +1,11 @@
 import { Request, Response } from "express";
 import { prisma } from "../db/prisma.js";
 import { ApiResponse } from "../types/index.js";
+import * as XLSX from "xlsx";
+import {
+  sendLeaveApprovedEmail,
+  sendLeaveRejectedEmail,
+} from "@/utils/mailer.js";
 function calcProRataTotal(
   joiningDate: Date,
   annualQuota: number,
@@ -132,9 +137,6 @@ export class LeaveController {
     }
   }
 
-  // =========================
-  // APPROVE LEAVE
-  // =========================
   static async approve(req: Request, res: Response<ApiResponse>) {
     try {
       const { id } = req.params;
@@ -145,6 +147,19 @@ export class LeaveController {
         return res
           .status(401)
           .json({ success: false, message: "Unauthorized user" });
+      }
+
+      const leaveWithDetails = await prisma.leave.findUnique({
+        where: { id },
+        include: {
+          employee: { include: { user: true } },
+          leaveType: true,
+        },
+      });
+      if (!leaveWithDetails) {
+        return res
+          .status(404)
+          .json({ success: false, message: "Leave not found" });
       }
 
       const result = await prisma.$transaction(async (tx) => {
@@ -177,7 +192,6 @@ export class LeaveController {
           });
           if (!employee) throw new Error("Employee not found");
 
-          // ── Pro-rata: 1 day per month, starting the month AFTER joining ──
           const total = policy.pro_rata
             ? calcProRataTotal(
                 new Date(employee.joining_date),
@@ -221,12 +235,30 @@ export class LeaveController {
               leave_type_id: leave.leave_type_id,
             },
           },
-          data: {
-            used: { increment: leave.days_count },
-          },
+          data: { used: { increment: leave.days_count } },
         });
 
         return updatedLeave;
+      });
+
+      const approver = await prisma.user.findUnique({
+        where: { id: user.userId },
+        select: { name: true },
+      });
+
+      await sendLeaveApprovedEmail({
+        to: leaveWithDetails.employee.user.email,
+        name: leaveWithDetails.employee.user.name,
+        leaveType: leaveWithDetails.leaveType.name,
+        startDate: leaveWithDetails.start_date.toLocaleDateString("en-US", {
+          dateStyle: "long",
+        }),
+        endDate: leaveWithDetails.end_date.toLocaleDateString("en-US", {
+          dateStyle: "long",
+        }),
+        totalDays: leaveWithDetails.days_count,
+        reason: leaveWithDetails.reason ?? undefined,
+        approvedBy: approver?.name ?? "HR",
       });
 
       return res.json({
@@ -243,9 +275,6 @@ export class LeaveController {
     }
   }
 
-  // =========================
-  // REJECT LEAVE
-  // =========================
   static async reject(req: Request, res: Response<ApiResponse>) {
     try {
       const { id } = req.params;
@@ -258,7 +287,13 @@ export class LeaveController {
           .json({ success: false, message: "Unauthorized user" });
       }
 
-      const existing = await prisma.leave.findUnique({ where: { id } });
+      const existing = await prisma.leave.findUnique({
+        where: { id },
+        include: {
+          employee: { include: { user: true } },
+          leaveType: true,
+        },
+      });
       if (!existing) {
         return res
           .status(404)
@@ -278,6 +313,27 @@ export class LeaveController {
           approved_by: user.userId,
           approval_notes: approval_notes || "No reason provided",
         },
+      });
+
+      const rejector = await prisma.user.findUnique({
+        where: { id: user.userId },
+        select: { name: true },
+      });
+
+      await sendLeaveRejectedEmail({
+        to: existing.employee.user.email,
+        name: existing.employee.user.name,
+        leaveType: existing.leaveType.name,
+        startDate: existing.start_date.toLocaleDateString("en-US", {
+          dateStyle: "long",
+        }),
+        endDate: existing.end_date.toLocaleDateString("en-US", {
+          dateStyle: "long",
+        }),
+        totalDays: existing.days_count,
+        reason: existing.reason ?? undefined,
+        rejectedBy: rejector?.name ?? "HR",
+        rejectionReason: approval_notes || undefined,
       });
 
       return res.json({
@@ -671,6 +727,96 @@ export class LeaveController {
       });
     } catch (error: any) {
       return res.status(500).json({ success: false, message: error.message });
+    }
+  }
+  //Export leaves to excel
+  static async exportLeaves(req: Request, res: Response) {
+    try {
+      const { month, leave_type, employee, status } = req.query;
+
+      const where: any = {};
+
+      if (month && month !== "all") {
+        const m = parseInt(month as string);
+        const year = new Date().getFullYear();
+        where.start_date = {
+          gte: new Date(year, m, 1),
+          lte: new Date(year, m + 1, 0, 23, 59, 59),
+        };
+      }
+
+      if (leave_type && leave_type !== "all") {
+        where.leaveType = { name: leave_type as string };
+      }
+
+      if (employee && employee !== "all") {
+        where.employee = { user: { name: employee as string } };
+      }
+
+      if (status && status !== "all") {
+        where.status = status as string;
+      }
+
+      const leaves = await prisma.leave.findMany({
+        where,
+        orderBy: { created_at: "desc" },
+        include: {
+          employee: { include: { user: true } },
+          leaveType: true,
+        },
+      });
+
+      const approverIds = [
+        ...new Set(
+          leaves.map((l) => l.approved_by).filter(Boolean) as string[],
+        ),
+      ];
+
+      const approvers = approverIds.length
+        ? await prisma.user.findMany({
+            where: { id: { in: approverIds } },
+            select: { id: true, name: true },
+          })
+        : [];
+
+      const approverMap = Object.fromEntries(
+        approvers.map((u) => [u.id, u.name]),
+      );
+
+      // ── Map rows ─────────────────────────────────────────────────────────────
+      const data = leaves.map((l) => ({
+        Employee: l.employee.user.name,
+        Department: l.employee.department,
+        LeaveType: l.leaveType.name,
+        FromDate: new Date(l.start_date).toISOString().split("T")[0],
+        ToDate: new Date(l.end_date).toISOString().split("T")[0],
+        Days: l.days_count,
+        Status: l.status,
+        Reason: l.reason ?? "—",
+        AppliedOn: new Date(l.created_at).toISOString().split("T")[0],
+        ApprovedBy: l.approved_by ? (approverMap[l.approved_by] ?? "—") : "—",
+        RejectionReason:
+          l.status === "rejected" ? (l.approval_notes ?? "—") : "—",
+      }));
+
+      const worksheet = XLSX.utils.json_to_sheet(data);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Leave Requests");
+
+      const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
+
+      res.setHeader(
+        "Content-Disposition",
+        "attachment; filename=leave-requests.xlsx",
+      );
+      res.setHeader(
+        "Content-Type",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      );
+      res.send(buffer);
+    } catch (err) {
+      console.log(err);
+      res.status(500).json({ message: "Export failed" });
     }
   }
 }

@@ -52,6 +52,7 @@ import { Asset } from "@/types";
 import { Textarea } from "@/components/ui/textarea";
 import { DialogDescription } from "@radix-ui/react-dialog";
 import { Protected } from "@/components/common/ProtectedRoute";
+import { AssetsAction } from "@/permissions/permission";
 
 // ─── Animation variants ───────────────────────────────────────────────────────
 const container = {
@@ -673,7 +674,7 @@ export default function AssetManagement() {
             </Button>
 
             {/* Add Asset dialog */}
-            <Protected allPermissions={["assets:create"]}>
+            <Protected allPermissions={[AssetsAction.Create]}>
               {" "}
               <Dialog open={addDialog} onOpenChange={setAddDialog}>
                 <DialogTrigger asChild>

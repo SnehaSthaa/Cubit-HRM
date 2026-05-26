@@ -107,8 +107,17 @@ interface ProfileFormData {
   father_name: string;
   grandfather_name: string;
   mother_name: string;
-  current_address: string;
-  permanent_address: string;
+  current_state?: string;
+  spouse_name?: string;
+  current_district?: string;
+  current_municipality?: string;
+  current_ward_no?: string;
+  current_tole?: string;
+  permanent_state?: string;
+  permanent_district?: string;
+  permanent_municipality?: string;
+  permanent_ward_no?: string;
+  permanent_tole?: string;
   citizenship_number?: string;
   pan_number?: string;
   nid_number?: string;
@@ -134,6 +143,7 @@ const documentTypes = [
   "National Identification",
   "Police Report",
   "SSF",
+  "Marriage Certificate",
   "Other",
 ];
 
@@ -188,8 +198,17 @@ const EMPTY_PROFILE: ProfileFormData = {
   father_name: "",
   grandfather_name: "",
   mother_name: "",
-  current_address: "",
-  permanent_address: "",
+  spouse_name: "",
+  current_state: "",
+  current_district: "",
+  current_municipality: "",
+  current_ward_no: "",
+  current_tole: "",
+  permanent_state: "",
+  permanent_district: "",
+  permanent_municipality: "",
+  permanent_ward_no: "",
+  permanent_tole: "",
   citizenship_number: "",
   pan_number: "",
   nid_number: "",
@@ -222,12 +241,22 @@ function profileFromEmployee(e: Employee, userEmail?: string): ProfileFormData {
     father_name: e.father_name ?? "",
     grandfather_name: e.grandfather_name ?? "",
     mother_name: e.mother_name ?? "",
-    current_address: e.current_address ?? "",
-    permanent_address: e.permanent_address ?? "",
+
     citizenship_number: e.citizenship_number ?? "",
     pan_number: e.pan_number ?? "",
     nid_number: e.nid_number ?? "",
     ssid_number: e.ssid_number ?? "",
+    spouse_name: e.spouse_name ?? "",
+    current_state: e.current_state ?? "",
+    current_district: e.current_district ?? "",
+    current_municipality: e.current_municipality ?? "",
+    current_ward_no: e.current_ward_no ?? "",
+    current_tole: e.current_tole ?? "",
+    permanent_state: e.permanent_state ?? "",
+    permanent_district: e.permanent_district ?? "",
+    permanent_municipality: e.permanent_municipality ?? "",
+    permanent_ward_no: e.permanent_ward_no ?? "",
+    permanent_tole: e.permanent_tole ?? "",
   };
 }
 function bankFromEmployee(e: Employee): BankFormData {
@@ -556,7 +585,13 @@ export default function EmployeeSelfService() {
     try {
       setSaving(true);
       const { employment_status, ...rest } = deptDraft;
-      await apiClient.updateEmployee(employee.id, rest);
+      const payload = {
+        ...rest,
+        joining_date: rest.joining_date
+          ? new Date(rest.joining_date).toISOString()
+          : undefined,
+      };
+      await apiClient.updateEmployee(employee.id, payload);
       setDeptCommitted({ ...deptDraft });
       setEmployee((prev) =>
         prev ? ({ ...prev, ...deptDraft } as unknown as Employee) : prev,
@@ -977,7 +1012,7 @@ export default function EmployeeSelfService() {
                     : displayName}
                 </h2>
                 <p className="text-sm text-muted-foreground">
-                  {deptCommitted.position} · {deptCommitted.department}
+                  {deptCommitted.position} {deptCommitted.department}
                 </p>
                 <div className="flex items-center gap-3 mt-2">
                   <span className="text-xs font-mono-data text-muted-foreground">
@@ -1229,6 +1264,7 @@ export default function EmployeeSelfService() {
                       )}
                     </div>
                   ))}
+                  {/* Marital Status select — add spouse name field conditionally after it */}
                   {[
                     {
                       label: "Gender",
@@ -1284,6 +1320,34 @@ export default function EmployeeSelfService() {
                       </div>
                     );
                   })}
+
+                  {/* Spouse name — only shown when married */}
+                  {(profileForm.marital_status?.toLowerCase() === "married" ||
+                    profileForm.marital_status?.toLowerCase() ===
+                      "widowed") && (
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">
+                        Spouse Name
+                      </p>
+                      {editing ? (
+                        <Input
+                          value={profileForm.spouse_name ?? ""}
+                          onChange={(e) =>
+                            setProfileForm({
+                              ...profileForm,
+                              spouse_name: e.target.value,
+                            })
+                          }
+                          className="h-8 text-sm"
+                          placeholder="Full name of spouse"
+                        />
+                      ) : (
+                        <p className="text-sm">
+                          {profileForm.spouse_name || "—"}
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1319,14 +1383,61 @@ export default function EmployeeSelfService() {
                   ))}
                 </div>
               </div>
-
               <div className="bg-card border border-border rounded-lg p-5">
                 <h3 className="text-sm font-semibold mb-4">Address</h3>
-                <div className="grid grid-cols-2 gap-4">
+
+                {/* Current Address */}
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-3">
+                  Current Address
+                </p>
+                <div className="grid grid-cols-3 gap-4 mb-5">
                   {(
                     [
-                      { label: "Current Address", key: "current_address" },
-                      { label: "Permanent Address", key: "permanent_address" },
+                      { label: "State", key: "current_state" },
+                      { label: "District", key: "current_district" },
+                      { label: "Municipality", key: "current_municipality" },
+                      { label: "Ward No.", key: "current_ward_no" },
+                      { label: "Tole", key: "current_tole" },
+                      { label: "Full Address", key: "current_address" },
+                    ] as { label: string; key: keyof ProfileFormData }[]
+                  ).map((f) => (
+                    <div key={f.key}>
+                      <p className="text-xs text-muted-foreground mb-1">
+                        {f.label}
+                      </p>
+                      {editing ? (
+                        <Input
+                          value={profileForm[f.key] ?? ""}
+                          onChange={(e) =>
+                            setProfileForm({
+                              ...profileForm,
+                              [f.key]: e.target.value,
+                            })
+                          }
+                          className="h-8 text-sm"
+                        />
+                      ) : (
+                        <p className="text-sm">{profileForm[f.key] || "—"}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                <hr className="border-border mb-4" />
+
+                {/* Permanent Address */}
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-3">
+                  Permanent Address
+                </p>
+                <div className="grid grid-cols-3 gap-4">
+                  {(
+                    [
+                      { label: "State", key: "permanent_state" },
+                      { label: "District", key: "permanent_district" },
+                      { label: "Municipality", key: "permanent_municipality" },
+                      { label: "Ward No.", key: "permanent_ward_no" },
+                      { label: "Tole", key: "permanent_tole" },
+                      { label: "Full Address", key: "permanent_address" },
                     ] as { label: string; key: keyof ProfileFormData }[]
                   ).map((f) => (
                     <div key={f.key}>

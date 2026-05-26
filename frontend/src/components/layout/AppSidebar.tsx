@@ -14,6 +14,7 @@ import {
   ChevronDown,
   DollarSign,
   Eye,
+  RefreshCw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme } from "./ThemeProvider";
@@ -38,7 +39,9 @@ import {
   ReportsAction,
   RolesandAccessAction,
   EmployeeSelfServiceAction,
-} from "@/permissions/permission"; // ← frontend copy, not backend path
+} from "@/permissions/permission";
+import { apiClient } from "@/services/apiClient";
+import { useState } from "react";
 
 const ALL_NAV = [
   {
@@ -140,7 +143,8 @@ export function AppSidebar() {
     previewRole,
     setPreviewRole,
   } = useRole();
-  const { user, logout } = useAuth();
+  const { user, logout, updateUser } = useAuth();
+  const [switching, setSwitching] = useState(false);
 
   const navGroups = ALL_NAV.map((group) => ({
     ...group,
@@ -151,6 +155,40 @@ export function AppSidebar() {
     logout();
     navigate("/login");
   };
+
+  const handleSwitchRole = async (newRole: UserRole) => {
+    try {
+      setSwitching(true);
+
+      const res = await apiClient.switchRole(newRole);
+
+      if (res.success && res.data?.token) {
+        localStorage.setItem("access_token", res.data.token);
+
+        const meRes = await apiClient.getMe();
+
+        if (meRes.success && meRes.data) {
+          const { user: u, employee } = meRes.data;
+
+          updateUser({
+            role: Array.isArray(u.role) ? u.role : [u.role],
+            activeRole: u.activeRole,
+            permissions: u.permissions ?? [],
+            profile_image: employee?.profile_image ?? undefined,
+          });
+
+          navigate("/");
+        }
+      }
+    } catch (err) {
+      console.error("Role switch failed", err);
+    } finally {
+      setSwitching(false);
+    }
+  };
+
+  // Only show role switcher if user has more than one role
+  const hasMultipleRoles = (user?.role?.length ?? 0) > 1;
 
   return (
     <aside className="fixed left-0 top-0 bottom-0 w-[240px] bg-sidebar border-r border-sidebar-border flex flex-col z-30">
@@ -202,7 +240,7 @@ export function AppSidebar() {
 
       {/* Footer */}
       <div className="p-3 border-t border-sidebar-border space-y-2">
-        {/* View As — only real super_admin sees this */}
+        {/* View As — preview mode for super_admin */}
         {role === "super_admin" && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -259,6 +297,47 @@ export function AppSidebar() {
           </DropdownMenu>
         )}
 
+        {/* Switch Role — real JWT switch for multi-role users (non super_admin) */}
+        {hasMultipleRoles && role !== "super_admin" && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-[12px] border border-dashed border-border text-muted-foreground hover:bg-sidebar-accent/70 transition-colors">
+                <div className="flex items-center gap-1.5">
+                  <RefreshCw
+                    className={cn("w-3 h-3", switching && "animate-spin")}
+                  />
+                  <span>
+                    Switch role:{" "}
+                    <span className="font-medium text-foreground">
+                      {roleLabels[activeRole]}
+                    </span>
+                  </span>
+                </div>
+                <ChevronDown className="w-3 h-3" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-48">
+              {(user?.role ?? []).map((r) => (
+                <DropdownMenuItem
+                  key={r}
+                  onClick={() => handleSwitchRole(r as UserRole)}
+                  className={cn(
+                    user?.activeRole === r && "font-semibold text-primary",
+                  )}
+                  disabled={switching}
+                >
+                  {roleLabels[r as UserRole]}
+                  {user?.activeRole === r && (
+                    <span className="ml-auto text-[10px] text-muted-foreground">
+                      active
+                    </span>
+                  )}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+
         {/* Preview banner */}
         {previewRole && (
           <div className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-primary/10 border border-primary/20">
@@ -305,7 +384,7 @@ export function AppSidebar() {
               {user?.name}
             </p>
             <p className="text-[11px] text-muted-foreground truncate">
-              {roleLabels[role]}
+              {roleLabels[activeRole]}
             </p>
           </div>
           <button

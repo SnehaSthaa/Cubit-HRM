@@ -12,7 +12,8 @@ export interface UserProfile {
   email: string;
   name: string;
   avatar?: string;
-  role: "super_admin" | "hr_admin" | "employee";
+  role: ("super_admin" | "hr_admin" | "employee")[];
+  activeRole: "super_admin" | "hr_admin" | "employee";
   profile_image?: string;
   permissions: string[];
 }
@@ -32,19 +33,20 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-// Shared helper — given a token already stored in localStorage,
-// fetches /me and returns a fully-populated UserProfile.
 async function fetchProfile(): Promise<UserProfile> {
   const meResponse = await apiClient.getMe();
   if (!meResponse.success || !meResponse.data) {
     throw new Error("Failed to load user profile");
   }
   const { user, employee } = meResponse.data;
+
   return {
     id: user.id,
     email: user.email,
     name: user.name,
-    role: user.role,
+    role: Array.isArray(user.role) ? user.role : [user.role],
+    activeRole:
+      user.activeRole ?? (Array.isArray(user.role) ? user.role[0] : user.role),
     profile_image: employee?.profile_image ?? undefined,
     permissions: user.permissions ?? [],
   };

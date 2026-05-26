@@ -12,6 +12,7 @@ import employeeEmergencyRoutes from "./employee.emergency.routes.js";
 import userRoutes from "./user.routes.js";
 
 import offboardingRoutes from "./offboarding.routes.js";
+import permissionRoutes from "./permission.routes.js";
 
 const router = Router();
 
@@ -27,6 +28,7 @@ router.use("/api/leave-policies", leavePolicyRoutes);
 router.use("/api/employee-documents", employeeDocumentRoutes);
 router.use("/api/employees", employeeEmergencyRoutes);
 router.use("/api/offboarding", offboardingRoutes);
+router.use("/api/permissions", permissionRoutes);
 
 router.get("/api/health", (req, res) => {
   res.json({ success: true, message: "Server is running" });

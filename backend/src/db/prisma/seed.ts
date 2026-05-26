@@ -1,14 +1,23 @@
 import "dotenv/config";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, UserRole } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
 import bcrypt from "bcrypt";
+import { allPermission } from "@/permissions/allowed-permission";
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter: new PrismaPg(pool) });
 
 async function main() {
   console.log("🌱 Seeding database...");
+  //Permisions
+  for (const [role, permissions] of Object.entries(allPermission)) {
+    await prisma.permission.upsert({
+      where: { role: role as UserRole },
+      update: { permissions },
+      create: { role: role as UserRole, permissions },
+    });
+  }
 
   // =====================
   // USERS
@@ -21,7 +30,7 @@ async function main() {
       email: "admin@harmonyhr.com",
       password_hash: adminPassword,
       name: "System Admin",
-      role: "super_admin",
+      role: ["super_admin"],
     },
   });
 
@@ -32,7 +41,7 @@ async function main() {
       email: "hr@harmonyhr.com",
       password_hash: await bcrypt.hash("hr123", 10),
       name: "HR Admin",
-      role: "hr_admin",
+      role: ["hr_admin", "employee"],
     },
   });
   await prisma.employee.upsert({
@@ -62,8 +71,9 @@ async function main() {
       email: "hr@harmonyhr.com",
       department: "Human Resources",
       joining_date: new Date(),
-      employment_status: "Active",
+      employment_status: "active",
       employment_type: "Full-time",
+      date_of_birth: new Date("1985-08-20"),
     },
   });
 
@@ -75,7 +85,7 @@ async function main() {
       email: "john@harmonyhr.com",
       password_hash: empPassword,
       name: "John Doe",
-      role: "employee",
+      role: ["employee"],
     },
   });
 
@@ -93,6 +103,9 @@ async function main() {
       email: "john@harmonyhr.com",
       department: "Engineering",
       joining_date: new Date("2024-01-15"),
+      employment_status: "active",
+      employment_type: "Full-time",
+      date_of_birth: new Date("1990-06-15"),
     },
   });
 

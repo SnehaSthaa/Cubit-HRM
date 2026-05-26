@@ -108,7 +108,7 @@ export class EmployeeController {
           email: employeeData.email!,
           password_hash: await bcrypt.hash(randomPassword, 10),
           name: `${employeeData.first_name} ${employeeData.last_name}`.trim(),
-          role: "employee",
+          role: ["employee"],
           is_active: true,
         },
       });

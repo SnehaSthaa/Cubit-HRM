@@ -58,7 +58,7 @@ router.patch(
 router.post(
   "/:id/profile-image",
   authenticate,
-  authorize("super_admin", "hr_admin"), // add role check
+  authorize("super_admin", "hr_admin"),
   hasRequiredPermission([EmployeesAction.Edit]),
   uploadImage.single("file"),
   EmployeeController.uploadProfileImage,

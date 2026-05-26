@@ -27,14 +27,17 @@ export function RoleProvider({ children }: { children: ReactNode }) {
 
   const [previewRole, setPreviewRole] = useState<UserRole | null>(null);
 
-  const role: UserRole = (user?.role as UserRole) ?? "employee";
+  const roles = (user?.role ?? ["employee"]) as UserRole[];
+  const role: UserRole =
+    (user?.activeRole as UserRole) ?? roles[0] ?? "employee";
 
   const activeRole: UserRole = previewRole ?? role;
 
-  const permissions = allPermission[activeRole];
+  const permissions = allPermission[activeRole] ?? allPermission["employee"];
 
   // Get all allowed actions
   const allowedActions = useMemo(() => {
+    if (!permissions) return [];
     return Object.values(permissions).flatMap((mod) =>
       Object.entries(mod)
         .filter(([, value]) => value === true)

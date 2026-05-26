@@ -279,7 +279,7 @@ model LeaveBalance {
 
 model Permission {
   id          Int      @id @default(autoincrement())
-  role        UserRole
+  role        UserRole @unique
   permissions Json
 
   @@map("permissions")

@@ -192,7 +192,8 @@ class ApiClient {
         id: string;
         email: string;
         name: string;
-        role: "super_admin" | "hr_admin" | "employee";
+        role: ("super_admin" | "hr_admin" | "employee")[];
+        activeRole: "super_admin" | "hr_admin" | "employee";
         permissions?: string[];
       };
       employee?: MeEmployee;
@@ -205,6 +206,35 @@ class ApiClient {
   }) {
     return this.parse(
       this.client.patch<ApiResponse>("/users/me/change-password", data),
+    );
+  }
+  switchRole(role: string) {
+    return this.parse<{ token: string; activeRole: string }>(
+      this.client.post<ApiResponse<{ token: string; activeRole: string }>>(
+        "/users/switch-role",
+        { role },
+      ),
+    );
+  }
+  assignRole(userId: string, role: string) {
+    return this.parse(this.client.post(`/users/assign-role`, { userId, role }));
+  }
+  removeRole(userId: string, role: string) {
+    return this.parse(
+      this.client.delete(`/users/remove-role`, { data: { userId, role } }),
+    );
+  }
+
+  //----------------PERMISSIONS----------------
+  getPermissionByRole(role: string) {
+    return this.parse(this.client.get<ApiResponse>(`/permissions/${role}`));
+  }
+  updatePermissionByRole(
+    role: string,
+    permissions: Record<string, Record<string, boolean>>,
+  ) {
+    return this.parse(
+      this.client.put<ApiResponse>(`/permissions/${role}`, { permissions }),
     );
   }
   // ---------------- EMPLOYEES ----------------
@@ -308,6 +338,23 @@ class ApiClient {
   }
   deleteLeave(id: string) {
     return this.parse(this.client.delete<ApiResponse>(`/leaves/${id}`));
+  }
+  exportLeaves(params?: {
+    month?: string;
+    leave_type?: string;
+    employee?: string;
+    status?: string;
+  }) {
+    const query = new URLSearchParams(
+      Object.entries(params ?? {}).filter(([_, v]) => v && v !== "all") as [
+        string,
+        string,
+      ][],
+    ).toString();
+
+    return this.client.get(`/leaves/export${query ? `?${query}` : ""}`, {
+      responseType: "blob",
+    });
   }
   //--------------Emergency Contacts-------------
   getEmergencyContacts(employeeId: string) {
@@ -512,7 +559,7 @@ class ApiClient {
       this.client.patch<ApiResponse>(`/assets/take-home-requests/${id}`, data),
     );
   }
-  //Offboarding
+
   // Offboarding
   getOffboardingEmployees() {
     return this.parse<Employee[]>(
