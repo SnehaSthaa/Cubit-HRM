@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
-  Search, Plus, Filter, MoreHorizontal, X, AlertTriangle,
+  Search, Plus, Filter, MoreHorizontal, X, AlertTriangle, AlertCircle,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -18,14 +18,13 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useRole } from "@/contexts/RoleContext";
 import { useToast } from "@/hooks/use-toast";
-import { apiClient } from "@/services/apiClient";
+import { apiClient, ApiError } from "@/services/apiClient";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   Employee, EmployeeAPI, CreateEmployeePayload,
   getLatestDepartment, normalizeEmployee, EmployeeStatus,
 } from "@/types/index";
 
-// ── Animation variants ───────────────────────────────────────────────────────
 const container = {
   hidden: { opacity: 0 },
   show: { opacity: 1, transition: { staggerChildren: 0.03 } },
@@ -35,7 +34,6 @@ const item = {
   show: { opacity: 1, y: 0, transition: { duration: 0.25, ease: [0.2, 0, 0, 1] } },
 };
 
-// ── Constants ────────────────────────────────────────────────────────────────
 const DEPARTMENTS = [
   "Engineering", "Marketing", "HR", "Operations", "Finance", "Design", "Support",
 ];
@@ -44,13 +42,6 @@ const STATUSES: EmployeeStatus[] = [
   "Active", "Inactive", "On Leave", "Resigned", "Notice Period", "Onboarding",
 ];
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-/**
- * Derives EmployeeStatus from the department record's employment_status field,
- * falling back to the local activeMap (seeded from user.is_active on load and
- * updated optimistically after activate/deactivate API calls).
- */
 function deriveStatus(
   emp: Employee,
   activeMap: Record<string, boolean>,
@@ -58,14 +49,13 @@ function deriveStatus(
   const latestDept = getLatestDepartment(emp.department);
   const raw = latestDept?.employment_status?.trim().toLowerCase();
 
-  if (raw === "on_leave"     || raw === "on leave")     return "On Leave";
-  if (raw === "resigned")                               return "Resigned";
-  if (raw === "notice_period"|| raw === "notice period")return "Notice Period";
-  if (raw === "onboarding")                             return "Onboarding";
-  if (raw === "inactive")                               return "Inactive";
-  if (raw === "active")                                 return "Active";
+  if (raw === "on_leave"      || raw === "on leave")      return "On Leave";
+  if (raw === "resigned")                                  return "Resigned";
+  if (raw === "notice_period" || raw === "notice period") return "Notice Period";
+  if (raw === "onboarding")                               return "Onboarding";
+  if (raw === "inactive")                                 return "Inactive";
+  if (raw === "active")                                   return "Active";
 
-  // Fall back to activeMap set from user.is_active
   return (activeMap[emp.id] ?? true) ? "Active" : "Inactive";
 }
 
@@ -102,6 +92,19 @@ function avatarColor(id: string): string {
   return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
 }
 
+// ── Field label map for human-readable error list ─────────────────────────────
+const FIELD_LABELS: Record<string, string> = {
+  email:          "Email",
+  date_of_birth:  "Date of Birth",
+  first_name:     "Full Name",
+  last_name:      "Full Name",
+  employee_id:    "Employee ID",
+  phone:          "Phone",
+  designation:    "Position",
+  department_name:"Department",
+  joining_date:   "Date of Joining",
+};
+
 // ── Component ────────────────────────────────────────────────────────────────
 export default function EmployeeList() {
   const navigate = useNavigate();
@@ -109,34 +112,34 @@ export default function EmployeeList() {
   const { user } = useAuth();
   const { toast } = useToast();
 
-  const [search, setSearch]           = useState("");
-  const [filterDept, setFilterDept]   = useState("all");
+  const [search, setSearch]             = useState("");
+  const [filterDept, setFilterDept]     = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
-  const [filterType, setFilterType]   = useState("all");
-  const [showFilters, setShowFilters] = useState(false);
-  const [addDialog, setAddDialog]     = useState(false);
+  const [filterType, setFilterType]     = useState("all");
+  const [showFilters, setShowFilters]   = useState(false);
+  const [addDialog, setAddDialog]       = useState(false);
 
-  const [employees, setEmployees]     = useState<Employee[]>([]);
-  const [loading, setLoading]         = useState(true);
+  const [employees, setEmployees]       = useState<Employee[]>([]);
+  const [loading, setLoading]           = useState(true);
+  const [activeMap, setActiveMap]       = useState<Record<string, boolean>>({});
 
-  /**
-   * activeMap: employee id -> is_active boolean.
-   * Seeded from user.is_active on load; updated optimistically on
-   * activate / deactivate so the status badge flips without a full refetch.
-   */
-  const [activeMap, setActiveMap]     = useState<Record<string, boolean>>({});
-
-  const [deleteTarget, setDeleteTarget]       = useState<Employee | null>(null);
-  const [deleteLoading, setDeleteLoading]     = useState(false);
-  const [deactivateTarget, setDeactivateTarget] = useState<Employee | null>(null);
+  const [deleteTarget, setDeleteTarget]           = useState<Employee | null>(null);
+  const [deleteLoading, setDeleteLoading]         = useState(false);
+  const [deactivateTarget, setDeactivateTarget]   = useState<Employee | null>(null);
   const [deactivateLoading, setDeactivateLoading] = useState(false);
-  const [activateTarget, setActivateTarget]   = useState<Employee | null>(null);
-  const [activateLoading, setActivateLoading] = useState(false);
+  const [activateTarget, setActivateTarget]       = useState<Employee | null>(null);
+  const [activateLoading, setActivateLoading]     = useState(false);
 
   const [newEmp, setNewEmp] = useState({
     employeeid: "", name: "", email: "", phone: "",
     dob: "", department: "", position: "", type: "Full-time", joinDate: "",
   });
+
+  // Maps API field names → error messages
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
+  const clearFieldError = (field: string) =>
+    setFieldErrors((prev) => ({ ...prev, [field]: "" }));
 
   // ── Data fetching ────────────────────────────────────────────────────────
   const fetchEmployees = async () => {
@@ -181,12 +184,15 @@ export default function EmployeeList() {
 
   const hasFilters = filterDept !== "all" || filterStatus !== "all" || filterType !== "all";
 
-  // ── Handlers ─────────────────────────────────────────────────────────────
+  // ── Add Employee ─────────────────────────────────────────────────────────
   const handleAddEmployee = async () => {
+    setFieldErrors({});
+
     if (!newEmp.name || !newEmp.email || !newEmp.department) {
       toast({ title: "Error", description: "Please fill in required fields" });
       return;
     }
+
     try {
       const [first_name, ...rest] = newEmp.name.trim().split(" ");
       const payload: CreateEmployeePayload = {
@@ -203,14 +209,37 @@ export default function EmployeeList() {
       };
       await apiClient.createEmployee(payload);
       await fetchEmployees();
-      setNewEmp({ employeeid: "", name: "", email: "", phone: "", dob: "", department: "", position: "", type: "Full-time", joinDate: "" });
+      setNewEmp({
+        employeeid: "", name: "", email: "", phone: "",
+        dob: "", department: "", position: "", type: "Full-time", joinDate: "",
+      });
+      setFieldErrors({});
       setAddDialog(false);
       toast({ title: "Success", description: `${newEmp.name} has been added.` });
     } catch (error: unknown) {
-      toast({ title: "Error", description: error instanceof Error ? error.message : "Failed to add employee" });
+      // ✅ FIX: apiClient interceptor strips `response` and re-throws a plain
+      // Error with validation messages attached as `.fields` (ApiError interface).
+      // The old code checked `error.response?.data` which is always undefined
+      // after the interceptor runs — so field errors were never shown.
+      const apiErr = error as ApiError;
+
+      if (apiErr.fields && typeof apiErr.fields === "object") {
+        const flat: Record<string, string> = {};
+        for (const [field, messages] of Object.entries(apiErr.fields)) {
+          flat[field] = Array.isArray(messages) ? messages[0] : String(messages);
+        }
+        setFieldErrors(flat);
+        // No toast — errors are shown in the banner inside the dialog
+      } else {
+        toast({
+          title: "Error",
+          description: apiErr.message ?? "Failed to add employee",
+        });
+      }
     }
   };
 
+  // ── Deactivate / Activate / Delete ───────────────────────────────────────
   const handleDeactivate = async () => {
     if (!deactivateTarget) return;
     setDeactivateLoading(true);
@@ -247,7 +276,11 @@ export default function EmployeeList() {
     try {
       await apiClient.deleteEmployee(deleteTarget.id);
       setEmployees((prev) => prev.filter((e) => e.id !== deleteTarget.id));
-      setActiveMap((prev) => { const next = { ...prev }; delete next[deleteTarget.id]; return next; });
+      setActiveMap((prev) => {
+        const next = { ...prev };
+        delete next[deleteTarget.id];
+        return next;
+      });
       toast({ title: "Employee deleted", description: `${deleteTarget.name} has been removed.` });
       setDeleteTarget(null);
     } catch (error: unknown) {
@@ -256,6 +289,8 @@ export default function EmployeeList() {
       setDeleteLoading(false);
     }
   };
+
+  const errorEntries = Object.entries(fieldErrors).filter(([, msg]) => !!msg);
 
   // ── Render ───────────────────────────────────────────────────────────────
   return (
@@ -270,7 +305,7 @@ export default function EmployeeList() {
           </p>
         </div>
         {isHR && (
-          <Dialog open={addDialog} onOpenChange={setAddDialog}>
+          <Dialog open={addDialog} onOpenChange={(open) => { setAddDialog(open); if (!open) setFieldErrors({}); }}>
             <DialogTrigger asChild>
               <Button size="sm" className="gap-1.5 press-effect">
                 <Plus className="w-3.5 h-3.5" /> Add Employee
@@ -279,50 +314,143 @@ export default function EmployeeList() {
             <DialogContent className="max-w-lg">
               <DialogHeader><DialogTitle>Add New Employee</DialogTitle></DialogHeader>
               <div className="space-y-4 pt-2">
-                <div className="grid grid-cols-2 gap-3">
-                  {[
-                    { label: "Employee ID", key: "employeeid", placeholder: "EMP001" },
-                    { label: "Full Name *", key: "name",       placeholder: "Enter full name" },
-                    { label: "Email *",     key: "email",      placeholder: "email@company.com", type: "email" },
-                    { label: "Phone",       key: "phone",      placeholder: "+977-98XXXXXXXX" },
-                    { label: "Position",    key: "position",   placeholder: "e.g., Sr. Developer" },
-                  ].map(({ label, key, placeholder, type }) => (
-                    <div key={key}>
-                      <label className="text-xs text-muted-foreground mb-1 block">{label}</label>
-                      <Input
-                        type={type ?? "text"}
-                        value={(newEmp as Record<string,string>)[key]}
-                        onChange={(e) => setNewEmp({ ...newEmp, [key]: e.target.value })}
-                        placeholder={placeholder}
-                        className="h-9 text-sm"
-                      />
+
+                {/* ── Error banner — shown only when there are API validation errors ── */}
+                {errorEntries.length > 0 && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="flex items-start gap-3 px-4 py-3 rounded-xl border border-destructive/30 bg-destructive/5"
+                  >
+                    <AlertCircle className="w-4 h-4 text-destructive shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-semibold text-destructive">
+                        {errorEntries.length} field{errorEntries.length > 1 ? "s" : ""} need{errorEntries.length === 1 ? "s" : ""} attention
+                      </p>
+                      <ul className="mt-1 space-y-0.5">
+                        {errorEntries.map(([field, message]) => (
+                          <li key={field} className="text-xs text-destructive/80 flex items-center gap-1">
+                            <span className="w-1 h-1 rounded-full bg-destructive/60 shrink-0" />
+                            <span className="font-medium">{FIELD_LABELS[field] ?? field}:</span> {message}
+                          </li>
+                        ))}
+                      </ul>
                     </div>
-                  ))}
+                  </motion.div>
+                )}
+
+                <div className="grid grid-cols-2 gap-3">
+
+                  {/* Employee ID */}
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">Employee ID</label>
+                    <Input
+                      value={newEmp.employeeid}
+                      onChange={(e) => { setNewEmp({ ...newEmp, employeeid: e.target.value }); clearFieldError("employee_id"); }}
+                      placeholder="EMP001"
+                      className={`h-9 text-sm transition-colors ${fieldErrors.employee_id ? "border-destructive focus-visible:ring-destructive/30 bg-destructive/5" : ""}`}
+                    />
+                  </div>
+
+                  {/* Full Name */}
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">Full Name *</label>
+                    <Input
+                      value={newEmp.name}
+                      onChange={(e) => { setNewEmp({ ...newEmp, name: e.target.value }); clearFieldError("first_name"); clearFieldError("last_name"); }}
+                      placeholder="Enter full name"
+                      className={`h-9 text-sm transition-colors ${fieldErrors.first_name || fieldErrors.last_name ? "border-destructive focus-visible:ring-destructive/30 bg-destructive/5" : ""}`}
+                    />
+                  </div>
+
+                  {/* Email */}
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">Email *</label>
+                    <Input
+                      type="email"
+                      value={newEmp.email}
+                      onChange={(e) => { setNewEmp({ ...newEmp, email: e.target.value }); clearFieldError("email"); }}
+                      placeholder="email@company.com"
+                      className={`h-9 text-sm transition-colors ${fieldErrors.email ? "border-destructive focus-visible:ring-destructive/30 bg-destructive/5" : ""}`}
+                    />
+                  </div>
+
+                  {/* Phone */}
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">Phone</label>
+                    <Input
+                      value={newEmp.phone}
+                      onChange={(e) => { setNewEmp({ ...newEmp, phone: e.target.value }); clearFieldError("phone"); }}
+                      placeholder="+977-98XXXXXXXX"
+                      className={`h-9 text-sm transition-colors ${fieldErrors.phone ? "border-destructive focus-visible:ring-destructive/30 bg-destructive/5" : ""}`}
+                    />
+                  </div>
+
+                  {/* Position */}
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">Position</label>
+                    <Input
+                      value={newEmp.position}
+                      onChange={(e) => { setNewEmp({ ...newEmp, position: e.target.value }); clearFieldError("designation"); }}
+                      placeholder="e.g., Sr. Developer"
+                      className={`h-9 text-sm transition-colors ${fieldErrors.designation ? "border-destructive focus-visible:ring-destructive/30 bg-destructive/5" : ""}`}
+                    />
+                  </div>
+
+                  {/* Date of Birth */}
                   <div>
                     <label className="text-xs text-muted-foreground mb-1 block">Date of Birth</label>
-                    <Input type="date" value={newEmp.dob} onChange={(e) => setNewEmp({ ...newEmp, dob: e.target.value })} className="h-9 text-sm" />
+                    <Input
+                      type="date"
+                      value={newEmp.dob}
+                      onChange={(e) => { setNewEmp({ ...newEmp, dob: e.target.value }); clearFieldError("date_of_birth"); }}
+                      className={`h-9 text-sm transition-colors ${fieldErrors.date_of_birth ? "border-destructive focus-visible:ring-destructive/30 bg-destructive/5" : ""}`}
+                      max={(() => {
+                        const d = new Date();
+                        d.setFullYear(d.getFullYear() - 18);
+                        return d.toISOString().split("T")[0];
+                      })()}
+                    />
                   </div>
+
+                  {/* Department */}
                   <div>
                     <label className="text-xs text-muted-foreground mb-1 block">Department *</label>
-                    <Select value={newEmp.department} onValueChange={(v) => setNewEmp({ ...newEmp, department: v })}>
-                      <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select" /></SelectTrigger>
-                      <SelectContent>{DEPARTMENTS.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}</SelectContent>
+                    <Select value={newEmp.department} onValueChange={(v) => { setNewEmp({ ...newEmp, department: v }); clearFieldError("department_name"); }}>
+                      <SelectTrigger className={`h-9 text-sm transition-colors ${fieldErrors.department_name ? "border-destructive focus-visible:ring-destructive/30 bg-destructive/5" : ""}`}>
+                        <SelectValue placeholder="Select" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {DEPARTMENTS.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+                      </SelectContent>
                     </Select>
                   </div>
+
+                  {/* Employment Type */}
                   <div>
                     <label className="text-xs text-muted-foreground mb-1 block">Employment Type</label>
                     <Select value={newEmp.type} onValueChange={(v) => setNewEmp({ ...newEmp, type: v })}>
                       <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
-                      <SelectContent>{TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
+                      <SelectContent>
+                        {TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                      </SelectContent>
                     </Select>
                   </div>
+
+                  {/* Date of Joining */}
                   <div>
                     <label className="text-xs text-muted-foreground mb-1 block">Date of Joining</label>
-                    <Input type="date" value={newEmp.joinDate} onChange={(e) => setNewEmp({ ...newEmp, joinDate: e.target.value })} className="h-9 text-sm" />
+                    <Input
+                      type="date"
+                      value={newEmp.joinDate}
+                      onChange={(e) => { setNewEmp({ ...newEmp, joinDate: e.target.value }); clearFieldError("joining_date"); }}
+                      className={`h-9 text-sm transition-colors ${fieldErrors.joining_date ? "border-destructive focus-visible:ring-destructive/30 bg-destructive/5" : ""}`}
+                    />
                   </div>
+
                 </div>
                 <div className="flex justify-end gap-2 pt-2">
-                  <Button variant="outline" size="sm" onClick={() => setAddDialog(false)}>Cancel</Button>
+                  <Button variant="outline" size="sm" onClick={() => { setAddDialog(false); setFieldErrors({}); }}>Cancel</Button>
                   <Button size="sm" onClick={handleAddEmployee}>Add Employee</Button>
                 </div>
               </div>
@@ -527,33 +655,23 @@ export default function EmployeeList() {
                             </button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end" className="w-48">
-
-                            {/* View Profile — navigates to default tab */}
                             <DropdownMenuItem onClick={() => navigate(`/employees/${emp.id}`)}>
                               View Profile
                             </DropdownMenuItem>
-
-                            {/* Edit Details — navigates to personal-details tab so HR can edit */}
                             {isHR && (
                               <DropdownMenuItem onClick={() => navigate(`/employees/${emp.id}?tab=personal-details`)}>
                                 Edit Details
                               </DropdownMenuItem>
                             )}
-
-                            {/* View Documents — navigates to documents tab */}
                             <DropdownMenuItem onClick={() => navigate(`/employees/${emp.id}?tab=documents`)}>
                               View Documents
                             </DropdownMenuItem>
-
-                            {/* View Attendance — navigates to attendance tab */}
                             <DropdownMenuItem onClick={() => navigate(`/employees/${emp.id}?tab=attendance`)}>
                               View Attendance
                             </DropdownMenuItem>
-
                             {isHR && (
                               <>
                                 <DropdownMenuSeparator />
-                                {/* Activate shown only for Inactive employees; Deactivate for all others */}
                                 {isInactive ? (
                                   <DropdownMenuItem
                                     className="text-emerald-500 focus:text-emerald-500"

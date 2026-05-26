@@ -1,3 +1,4 @@
+// src/pages/EmployeeSelfService.tsx
 import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { z } from "zod";
@@ -20,7 +21,26 @@ import type { Employee, EmployeeAPI, EmergencyContact, EmployeeDocument, LeaveBa
 import { getLatestDepartment, normalizeEmployee } from "@/types";
 import { apiClient, type AssetApi } from "@/services/apiClient";
 
-// ── Inline Zod schema (no external validator file needed) ─────────────────────
+// ── Regex patterns ────────────────────────────────────────────────────────────
+const nepaliPhone    = /^(\+977[-\s]?)?[9][6-9]\d{8}$/;
+const citizenshipRgx = /^\d{2}-\d{2}-\d{2}-\d{5}$/;   // e.g. 01-01-78-00123
+const panRgx         = /^[A-Z]{3}\d{7}$/;               // e.g. ABC1234567
+const nidRgx         = /^\d{16}$/;
+const nameRgx        = /^[a-zA-Z\s'.,-]+$/;
+
+function ageAtLeast(years: number) {
+  return (dob: string) => {
+    const birth = new Date(dob);
+    const today = new Date();
+    const age =
+      today.getFullYear() -
+      birth.getFullYear() -
+      (today < new Date(today.getFullYear(), birth.getMonth(), birth.getDate()) ? 1 : 0);
+    return age >= years;
+  };
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 const fuzzyEnum = (options: string[]) =>
   z.preprocess(
     (val) => {
@@ -35,26 +55,145 @@ const fuzzyEnum = (options: string[]) =>
     z.enum(options as [string, ...string[]]),
   );
 
+// ── Zod schema with specific messages for every field ────────────────────────
 const updatePersonalDetailSchema = z.object({
-  first_name:         z.string().trim().min(1, "First name is required").optional(),
-  last_name:          z.string().trim().min(1, "Last name is required").optional(),
-  email:              z.string().email("Must be a valid email address").optional(),
-  phone:              z.preprocess((v) => (v === "" || v === null ? undefined : v), z.string().optional()),
-  date_of_birth:      z.preprocess(
+  first_name: z
+    .string()
+    .trim()
+    .min(1, "First name is required")
+    .max(50, "First name must be under 50 characters")
+    .regex(nameRgx, "First name must contain letters only (no numbers or special characters)")
+    .optional(),
+
+  last_name: z
+    .string()
+    .trim()
+    .min(1, "Last name is required")
+    .max(50, "Last name must be under 50 characters")
+    .regex(nameRgx, "Last name must contain letters only (no numbers or special characters)")
+    .optional(),
+
+  email: z
+    .string()
+    .trim()
+    .email("Must be a valid email address (e.g. name@example.com)")
+    .optional(),
+
+  phone: z.preprocess(
     (v) => (v === "" || v === null ? undefined : v),
-    z.string().refine((v) => !v || !isNaN(new Date(v).getTime()), "Invalid date").optional(),
+    z
+      .string()
+      .regex(nepaliPhone, "Phone must be a valid Nepali number starting with 98, 97, 96 etc. (e.g. 9812345678)")
+      .optional(),
   ),
-  gender:             fuzzyEnum(["Male", "Female", "Others"]).optional(),
-  marital_status:     fuzzyEnum(["Single", "Married", "Divorced", "Widowed"]).optional(),
-  citizenship_number: z.string().optional(),
-  pan_number:         z.string().optional(),
-  nid_number:         z.string().optional(),
-  ssid_number:        z.string().optional(),
-  father_name:        z.string().optional(),
-  mother_name:        z.string().optional(),
-  grandfather_name:   z.string().optional(),
-  current_address:    z.string().optional(),
-  permanent_address:  z.string().optional(),
+
+  date_of_birth: z.preprocess(
+  (v) => (v === "" || v === null ? undefined : v),
+  z
+    .string()
+    .refine((v) => !v || !isNaN(new Date(v).getTime()), "Date of birth is not a valid date")
+    .refine((v) => {
+      if (!v) return true;
+      // Compare date strings directly to avoid timezone issues
+      const today = new Date().toISOString().split("T")[0];
+      return v < today;
+    }, "Date of birth cannot be today or in the future")
+    .refine((v) => !v || ageAtLeast(18)(v), "You must be at least 18 years old")
+    .optional(),
+),
+
+  gender: fuzzyEnum(["Male", "Female", "Others"]).optional(),
+
+  marital_status: fuzzyEnum(["Single", "Married", "Divorced", "Widowed"]).optional(),
+
+  citizenship_number: z.preprocess(
+    (v) => (v === "" || v === null ? undefined : v),
+    z
+      .string()
+      .regex(
+        citizenshipRgx,
+        "Citizenship number must be in format XX-XX-XX-XXXXX using digits only (e.g. 01-02-78-00123)",
+      )
+      .optional(),
+  ),
+
+  pan_number: z.preprocess(
+    (v) => (v === "" || v === null ? undefined : v),
+    z
+      .string()
+      .regex(
+        panRgx,
+        "PAN number must be 3 uppercase letters followed by 7 digits, no spaces (e.g. ABC1234567)",
+      )
+      .optional(),
+  ),
+
+  nid_number: z.preprocess(
+    (v) => (v === "" || v === null ? undefined : v),
+    z
+      .string()
+      .regex(nidRgx, "NID must be exactly 16 digits — no letters, spaces, or dashes")
+      .optional(),
+  ),
+
+  ssid_number: z.preprocess(
+    (v) => (v === "" || v === null ? undefined : v),
+    z
+      .string()
+      .min(6, "SSF SSID must be at least 6 characters")
+      .max(20, "SSF SSID must be under 20 characters")
+      .optional(),
+  ),
+
+  father_name: z.preprocess(
+    (v) => (v === "" || v === null ? undefined : v),
+    z
+      .string()
+      .trim()
+      .max(100, "Father's name must be under 100 characters")
+      .regex(nameRgx, "Father's name must contain letters only (no numbers or special characters)")
+      .optional(),
+  ),
+
+  mother_name: z.preprocess(
+    (v) => (v === "" || v === null ? undefined : v),
+    z
+      .string()
+      .trim()
+      .max(100, "Mother's name must be under 100 characters")
+      .regex(nameRgx, "Mother's name must contain letters only (no numbers or special characters)")
+      .optional(),
+  ),
+
+  grandfather_name: z.preprocess(
+    (v) => (v === "" || v === null ? undefined : v),
+    z
+      .string()
+      .trim()
+      .max(100, "Grandfather's name must be under 100 characters")
+      .regex(nameRgx, "Grandfather's name must contain letters only (no numbers or special characters)")
+      .optional(),
+  ),
+
+  current_address: z.preprocess(
+    (v) => (v === "" || v === null ? undefined : v),
+    z
+      .string()
+      .trim()
+      .min(5, "Current address must be at least 5 characters")
+      .max(255, "Current address is too long (max 255 characters)")
+      .optional(),
+  ),
+
+  permanent_address: z.preprocess(
+    (v) => (v === "" || v === null ? undefined : v),
+    z
+      .string()
+      .trim()
+      .min(5, "Permanent address must be at least 5 characters")
+      .max(255, "Permanent address is too long (max 255 characters)")
+      .optional(),
+  ),
 });
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -75,7 +214,6 @@ interface ProfileFormData {
   citizenship_number: string; pan_number: string;
   nid_number: string; ssid_number: string;
 }
-// Internal shape of employees returned from getEmployees()
 interface RawEmployeeRecord {
   id: string;
   user_id?: string;
@@ -89,7 +227,7 @@ type ProfileErrors = Partial<Record<keyof ProfileFormData, string>>;
 const itemVariant = { hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0 } };
 const containerVariant = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.04 } } };
 
-// ── Inline field error component ──────────────────────────────────────────────
+// ── Field error component ─────────────────────────────────────────────────────
 function FieldError({ message }: { message?: string }) {
   if (!message) return null;
   return (
@@ -190,26 +328,6 @@ function deptFromEmployee(e: Employee): DeptFormData {
   };
 }
 
-// ── Human-readable Zod field error messages ───────────────────────────────────
-const fieldLabels: Partial<Record<keyof ProfileFormData, string>> = {
-  first_name: "First name", last_name: "Last name", email: "Email",
-  phone: "Phone", date_of_birth: "Date of birth", gender: "Gender",
-  marital_status: "Marital status", father_name: "Father's name",
-  grandfather_name: "Grandfather's name", mother_name: "Mother's name",
-  current_address: "Current address", permanent_address: "Permanent address",
-  citizenship_number: "Citizenship number", pan_number: "PAN number",
-  nid_number: "NID number", ssid_number: "SSF SSID",
-};
-
-function humanizeZodMessage(field: keyof ProfileFormData, zodMessage: string): string {
-  const label = fieldLabels[field] ?? field;
-  if (zodMessage.includes("Invalid email") || zodMessage.includes("valid email")) return `${label} must be a valid email address`;
-  if (zodMessage.includes("too_small") || zodMessage.includes("at least") || zodMessage.includes("required")) return `${label} is required`;
-  if (zodMessage.includes("Invalid enum") || zodMessage.includes("Invalid option")) return `Please select a valid ${label.toLowerCase()}`;
-  if (zodMessage.includes("invalid_date") || zodMessage.includes("Invalid date")) return `${label} is not a valid date`;
-  return `${label}: ${zodMessage}`;
-}
-
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function EmployeeSelfService() {
   const { toast } = useToast();
@@ -291,7 +409,6 @@ export default function EmployeeSelfService() {
         if (!rawEmployee) {
           try {
             const allRes = await apiClient.getEmployees();
-            // ── FIX: cast through unknown to bridge EmployeeAPI[] ↔ RawEmployeeRecord[] ──
             const employees = (allRes.data ?? []) as unknown as RawEmployeeRecord[];
             const found = employees.find((emp) => {
               if (emp.user_id && meUser.id && emp.user_id === meUser.id) return true;
@@ -300,7 +417,7 @@ export default function EmployeeSelfService() {
             });
             rawEmployee = found ? (found as unknown as EmployeeAPI) : null;
           } catch {
-            // silently ignore — will show "no profile" message below
+            // silently ignore
           }
         }
 
@@ -334,7 +451,7 @@ export default function EmployeeSelfService() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Load sub-resources when employee resolves ─────────────────────────────
+  // ── Load sub-resources ────────────────────────────────────────────────────
   useEffect(() => {
     if (!employee?.id) return;
     apiClient.getDocuments(employee.id)
@@ -386,31 +503,20 @@ export default function EmployeeSelfService() {
     if (!employee?.id) return;
     setProfileErrors({});
 
-    const result = updatePersonalDetailSchema.safeParse({
-      first_name:         profileForm.first_name         || undefined,
-      last_name:          profileForm.last_name          || undefined,
-      email:              profileForm.email              || undefined,
-      phone:              profileForm.phone              || undefined,
-      date_of_birth:      profileForm.date_of_birth      || undefined,
-      gender:             profileForm.gender             || undefined,
-      marital_status:     profileForm.marital_status     || undefined,
-      father_name:        profileForm.father_name        || undefined,
-      grandfather_name:   profileForm.grandfather_name   || undefined,
-      mother_name:        profileForm.mother_name        || undefined,
-      current_address:    profileForm.current_address    || undefined,
-      permanent_address:  profileForm.permanent_address  || undefined,
-      citizenship_number: profileForm.citizenship_number || undefined,
-      pan_number:         profileForm.pan_number         || undefined,
-      nid_number:         profileForm.nid_number         || undefined,
-      ssid_number:        profileForm.ssid_number        || undefined,
-    });
+    // Parse — empty strings become undefined so optional fields skip validation
+    const result = updatePersonalDetailSchema.safeParse(
+      Object.fromEntries(
+        Object.entries(profileForm).map(([k, v]) => [k, v === "" ? undefined : v])
+      )
+    );
 
     if (!result.success) {
       const errors: ProfileErrors = {};
       for (const issue of result.error.issues) {
         const field = issue.path[0] as keyof ProfileFormData;
         if (field && !errors[field]) {
-          errors[field] = humanizeZodMessage(field, issue.message);
+          // Messages are already specific — use them directly
+          errors[field] = issue.message;
         }
       }
       setProfileErrors(errors);
@@ -448,9 +554,9 @@ export default function EmployeeSelfService() {
 
       await apiClient.updatePersonalDetails(employee.id, payload);
 
+      // Refresh employee data
       try {
         const refreshed = await apiClient.getEmployees();
-        // ── FIX: cast through unknown to bridge EmployeeAPI[] ↔ RawEmployeeRecord[] ──
         const allEmployees = (refreshed.data ?? []) as unknown as RawEmployeeRecord[];
         const found = allEmployees.find((e: RawEmployeeRecord) => e.id === employee.id);
         if (found) {
@@ -481,6 +587,7 @@ export default function EmployeeSelfService() {
       markChanged("profile");
       toast({ title: "Profile updated", description: "Awaiting HR verification." });
     } catch (err: unknown) {
+      // Try to map API field errors back to inline field errors
       const axiosErr = err as { response?: { data?: { errors?: Record<string, string[]> } } };
       const apiErrors = axiosErr?.response?.data?.errors;
 
@@ -489,7 +596,7 @@ export default function EmployeeSelfService() {
         for (const [field, messages] of Object.entries(apiErrors)) {
           const key = field as keyof ProfileFormData;
           if (Array.isArray(messages) && messages[0]) {
-            mapped[key] = humanizeZodMessage(key, messages[0]);
+            mapped[key] = messages[0];
           }
         }
         if (Object.keys(mapped).length > 0) {
@@ -506,6 +613,7 @@ export default function EmployeeSelfService() {
 
       toast({ title: "Failed to save profile", description: errMsg(err), variant: "destructive" });
     } finally { setSaving(false); }
+  };
 
   const handleSaveBank = async () => {
     if (!employee?.id) return;
@@ -703,7 +811,7 @@ export default function EmployeeSelfService() {
     } finally { setChangingPassword(false); }
   };
 
-  // ── Derived display values ─────────────────────────────────────────────────
+  // ── Derived display values ────────────────────────────────────────────────
   const displayName =
     `${employee?.personal_details?.first_name ?? ""} ${employee?.personal_details?.last_name ?? ""}`.trim() ||
     employee?.name || employee?.email || "—";
@@ -1368,4 +1476,4 @@ export default function EmployeeSelfService() {
       </motion.div>
     </motion.div>
   );
-}}
+}

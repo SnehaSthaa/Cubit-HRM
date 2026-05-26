@@ -2,6 +2,7 @@ import { Router } from "express";
 import authRoutes from "./auth.routes.js";
 import employeeRoutes from "./employee.routes.js";
 import attendanceRoutes from "./attendance.routes.js";
+import attendanceRequestRoutes from "./attendanceRequest.routes.js";
 import leaveRoutes from "./leave.routes.js";
 import payrollRoutes from "./payroll.routes.js";
 import assetRoutes from "./asset.routes.js";
@@ -19,6 +20,7 @@ const router = Router();
 router.use("/api/auth", authRoutes);
 router.use("/api/users", userRoutes);
 router.use("/api/employees", employeeRoutes);
+router.use("/api/attendance/requests", attendanceRequestRoutes); // ← must be BEFORE /api/attendance
 router.use("/api/attendance", attendanceRoutes);
 router.use("/api/leaves", leaveRoutes);
 router.use("/api/payroll", payrollRoutes);

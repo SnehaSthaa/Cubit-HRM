@@ -339,8 +339,6 @@ model LeaveBalance {
   @@map("leave_balances")
 }
 
-// ── Enums ────────────────────────────────────────────────────────────────────
-
 enum UserRole {
   super_admin
   hr_admin
