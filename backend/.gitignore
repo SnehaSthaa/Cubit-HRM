@@ -19,3 +19,5 @@ coverage/
 /src/generated/prisma
 
 /src/generated/prisma
+
+/minio-data
