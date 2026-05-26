@@ -18,6 +18,32 @@ export interface UserProfile {
   permissions: string[];
 }
 
+// ── Typed shapes for API responses ───────────────────────────────────────────
+interface AuthUserData {
+  id: string;
+  email: string;
+  name: string;
+  role: "super_admin" | "hr_admin" | "employee";
+}
+
+interface AuthResponseData {
+  user: AuthUserData;
+  token: string;
+}
+
+interface MeUserData {
+  id: string;
+  email: string;
+  name: string;
+  role: "super_admin" | "hr_admin" | "employee";
+}
+
+interface MeResponseData {
+  user: MeUserData;
+  employee?: unknown;
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 interface AuthContextValue {
   user: UserProfile | null;
   isAuthenticated: boolean;
@@ -56,7 +82,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Rehydrate session on mount
   useEffect(() => {
     const initializeAuth = async () => {
       const token = localStorage.getItem("access_token");
@@ -64,8 +89,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         try {
           const profile = await fetchProfile();
           setUser(profile);
+        
         } catch {
-          // Token is invalid or expired — clear everything
           localStorage.removeItem("access_token");
           localStorage.removeItem("cubit-auth-user");
         }
@@ -83,10 +108,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const login = async (email: string, password: string) => {
-    const response = await apiClient.login(email, password);
-    if (!response.success || !response.data) {
-      throw new Error(response.message || "Login failed");
-    }
+    
+      const response = await apiClient.login(email, password);
+
+      if (!response.success || !response.data) {
+        throw new Error(response.message || "Login failed");
+      }
+
+ 
+    
     // Store token first so fetchProfile's apiClient picks it up
     localStorage.setItem("access_token", response.data.token);
     const profile = await fetchProfile();
@@ -94,10 +124,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signup = async (email: string, password: string, name: string) => {
-    const response = await apiClient.register(email, password, name);
-    if (!response.success || !response.data) {
-      throw new Error(response.message || "Registration failed");
-    }
+   
+      const response = await apiClient.register(email, password, name);
+
+      if (!response.success || !response.data) {
+        throw new Error(response.message || "Registration failed");
+      }
+
+    
     // Same pattern as login — store token, then fetch full profile
     localStorage.setItem("access_token", response.data.token);
     const profile = await fetchProfile();

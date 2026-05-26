@@ -122,6 +122,11 @@ const ALL_NAV = [
         label: "Roles & Access",
         action: RolesandAccessAction.View,
       },
+      { to: "/ess", icon: FileText, label: "My Profile" },
+      { to: "/attendance", icon: Clock, label: "My Attendance" },
+      { to: "/leave", icon: CalendarDays, label: "Leave" },
+      { to: "/payroll", icon: DollarSign, label: "My Payslips" },
+      {to: "/assets", icon: Package, label: "My Assets"}
     ],
   },
 ];

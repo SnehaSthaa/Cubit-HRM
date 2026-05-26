@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { prisma } from "@/db/prisma";
+import { prisma } from "@/db/prisma.js";
 
 export class EmployeeEmergencyController {
   static async addEmergencyContact(req: Request, res: Response) {

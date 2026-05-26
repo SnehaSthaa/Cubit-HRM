@@ -7,7 +7,6 @@ import {
   Filter,
   MoreHorizontal,
   X,
-  Trash2,
   ArrowUp,
   ArrowUpDown,
   ArrowDown,
@@ -39,11 +38,20 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useRole } from "@/contexts/RoleContext";
 import { useToast } from "@/hooks/use-toast";
-import { apiClient, ApiResponse } from "@/services/apiClient";
+import { apiClient } from "@/services/apiClient";
 import { useAuth } from "@/contexts/AuthContext";
 import { EmployeesAction } from "@/permissions/permission";
 import { Protected } from "@/components/common/ProtectedRoute";
+import {
+  type Employee,
+  type EmployeeAPI,
+  normalizeEmployee,
+  getLatestDepartment,
+} from "@/types";
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Animation variants
+// ─────────────────────────────────────────────────────────────────────────────
 const container = {
   hidden: { opacity: 0 },
   show: { opacity: 1, transition: { staggerChildren: 0.03 } },
@@ -56,43 +64,10 @@ const item = {
     transition: { duration: 0.25, ease: [0.2, 0, 0, 1] },
   },
 };
-type EmployeeStatus = "active" | "notice_period" | "resigned";
 
-interface Employee {
-  employee_id: string;
-  id: string;
-  name?: string;
-  first_name?: string;
-  last_name?: string;
-  email: string;
-  department: string;
-  profile_image: string;
-  position?: string;
-  joining_date?: string;
-  employment_status?: EmployeeStatus;
-  phone?: string;
-  type?: "Full-time" | "Contract" | "Part-time";
-}
-
-const statusClass: Record<EmployeeStatus, string> = {
-  active: "active",
-  notice_period: "notice_period",
-  resigned: "resigned",
-};
-interface EmployeeAPI {
-  id: string;
-  employee_id: string;
-  first_name: string;
-  last_name: string;
-  email: string;
-  phone?: string;
-  department?: string;
-  profile_image?: string;
-  position?: string;
-  joining_date?: string;
-  employment_status?: string;
-}
-
+// ─────────────────────────────────────────────────────────────────────────────
+// Constants
+// ─────────────────────────────────────────────────────────────────────────────
 const departments = [
   "Engineering",
   "Marketing",
@@ -105,18 +80,71 @@ const departments = [
 
 const types = ["Full-time", "Contract", "Part-time"];
 
+// Status pill CSS classes keyed by the raw employment_status string from
+// personal_details / department record.
+const statusClass: Record<string, string> = {
+  active: "active",
+  notice_period: "notice_period",
+  resigned: "resigned",
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers — read nested fields from the normalised Employee type
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** employment_status from personal_details, falling back to latest dept record */
+function getEmploymentStatus(emp: Employee): string {
+  return (
+    emp.personal_details?.employment_status ??
+    getLatestDepartment(emp.department)?.employment_status ??
+    "active"
+  ).toLowerCase();
+}
+
+/** department_name from the most-recent DepartmentRecord */
+function getDeptName(emp: Employee): string {
+  return getLatestDepartment(emp.department)?.department_name ?? "—";
+}
+
+/** designation / position from the most-recent DepartmentRecord */
+function getDesignation(emp: Employee): string {
+  return getLatestDepartment(emp.department)?.designation ?? "—";
+}
+
+/** joining_date from personal_details, falling back to latest dept record */
+function getJoiningDate(emp: Employee): string {
+  return (
+    emp.personal_details?.joining_date ??
+    getLatestDepartment(emp.department)?.joining_date ??
+    "—"
+  );
+}
+
+/** employment_type from personal_details, falling back to latest dept record */
+function getEmploymentType(emp: Employee): string {
+  return (
+    emp.personal_details?.employment_type ??
+    getLatestDepartment(emp.department)?.employment_type ??
+    "Full-time"
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Component
+// ─────────────────────────────────────────────────────────────────────────────
 export default function EmployeeList() {
   const navigate = useNavigate();
   const { isHR } = useRole();
   const { user } = useAuth();
   const { toast } = useToast();
-  const [search, setSearch] = useState("");
 
+  const [search, setSearch] = useState("");
   const [filterDept, setFilterDept] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterType, setFilterType] = useState("all");
   const [showFilters, setShowFilters] = useState(false);
   const [addDialog, setAddDialog] = useState(false);
+  // FIX: Employee[] not Employee
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [sortEmployeeId, setSortEmployeeId] = useState<"asc" | "desc" | null>(
@@ -125,6 +153,7 @@ export default function EmployeeList() {
   const [sortEmployeeName, setSortEmployeeName] = useState<
     "asc" | "desc" | null
   >(null);
+
   const {
     register,
     handleSubmit,
@@ -135,34 +164,26 @@ export default function EmployeeList() {
     resolver: zodResolver(employeeSchema),
   });
 
-  // Fetch employees from API
+  // ── Fetch employees ────────────────────────────────────────────────────────
   useEffect(() => {
     const fetchEmployees = async () => {
       try {
         const response = await apiClient.getEmployees();
+        const raw: EmployeeAPI[] = Array.isArray(response.data)
+          ? response.data
+          : [];
 
-        const data = response.data ?? [];
+        // FIX: use normalizeEmployee (from @/types) so Employee always has
+        // name, email, and properly nested personal_details / department[].
+        // Then filter by employment_status via the helper.
+        const normalised: Employee[] = raw
+          .map(normalizeEmployee)
+          .filter((emp) => {
+            const status = getEmploymentStatus(emp);
+            return status === "active" || status === "notice_period";
+          });
 
-        const normalizedEmployees: Employee[] = (data as EmployeeAPI[])
-          .filter(
-            (emp) =>
-              emp.employment_status === "active" ||
-              emp.employment_status === "notice_period",
-          )
-          .map((emp) => ({
-            id: emp.id,
-            employee_id: emp.employee_id,
-            name: `${emp.first_name} ${emp.last_name}`.trim(),
-            profile_image: emp.profile_image,
-            email: emp.email,
-            department: emp.department ?? "—",
-            position: emp.position ?? "—",
-            joining_date: emp.joining_date ?? "",
-            phone: emp.phone ?? "",
-            employment_status: emp.employment_status as EmployeeStatus,
-          }));
-
-        setEmployees(normalizedEmployees);
+        setEmployees(normalised);
       } catch (error) {
         console.error("Error fetching employees:", error);
         setEmployees([]);
@@ -174,50 +195,56 @@ export default function EmployeeList() {
     fetchEmployees();
   }, []);
 
+  // ── Filter + sort ──────────────────────────────────────────────────────────
   const filtered = employees
     .filter((e) => {
       const q = search.toLowerCase();
+      const dept = getDeptName(e);
+      const status = getEmploymentStatus(e);
+      const type = getEmploymentType(e);
 
       const matchSearch =
         e.name?.toLowerCase().includes(q) ||
-        e.id.toLowerCase().includes(q) ||
-        e.department?.toLowerCase().includes(q);
-      const matchDept = filterDept === "all" || e.department === filterDept;
-      const matchStatus =
-        filterStatus === "all" || e.employment_status === filterStatus;
-      const matchType =
-        filterType === "all" || (e.type ?? "Full-time") === filterType;
+        e.employee_id.toLowerCase().includes(q) ||
+        dept.toLowerCase().includes(q);
+
+      const matchDept = filterDept === "all" || dept === filterDept;
+      const matchStatus = filterStatus === "all" || status === filterStatus;
+      const matchType = filterType === "all" || type === filterType;
 
       return matchSearch && matchDept && matchStatus && matchType;
     })
     .sort((a, b) => {
       if (sortEmployeeId) {
-        const employeeIdA = a.employee_id.toLocaleLowerCase();
-        const employeeIdB = b.employee_id.toLocaleLowerCase();
+        const idA = a.employee_id.toLowerCase();
+        const idB = b.employee_id.toLowerCase();
         return sortEmployeeId === "asc"
-          ? employeeIdA.localeCompare(employeeIdB)
-          : employeeIdB.localeCompare(employeeIdA);
+          ? idA.localeCompare(idB)
+          : idB.localeCompare(idA);
       }
       if (sortEmployeeName) {
-        const employeeNameA = a.name.toLocaleLowerCase();
-        const employeeNameB = b.name.toLocaleLowerCase();
+        const nameA = a.name.toLowerCase();
+        const nameB = b.name.toLowerCase();
         return sortEmployeeName === "asc"
-          ? employeeNameA.localeCompare(employeeNameB)
-          : employeeNameB.localeCompare(employeeNameA);
+          ? nameA.localeCompare(nameB)
+          : nameB.localeCompare(nameA);
       }
+      // FIX: must return a number — was implicitly returning undefined
+      return 0;
     });
 
   const hasFilters =
     filterDept !== "all" || filterStatus !== "all" || filterType !== "all";
 
+  // ── Add employee ───────────────────────────────────────────────────────────
   const handleAddEmployee = async (data: EmployeeFormData) => {
     const nameParts = data.full_name.trim().split(" ");
     const first_name = nameParts[0];
     const last_name = nameParts.slice(1).join(" ") || nameParts[0];
 
     try {
-      const existingEmployees = await apiClient.getEmployees();
-      const isDuplicate = existingEmployees.data?.some(
+      const existingRes = await apiClient.getEmployees();
+      const isDuplicate = (existingRes.data ?? []).some(
         (emp) => emp.employee_id === data.employee_id,
       );
 
@@ -229,71 +256,54 @@ export default function EmployeeList() {
         });
         return;
       }
-      const employeeData: Record<string, unknown> = {
+
+      await apiClient.createEmployee({
         first_name,
         last_name,
         email: data.email,
-        department: data.department,
+        department_name: data.department,
         joining_date: data.joining_date,
         employee_id: data.employee_id,
-        position: data.position,
+        phone: data.phone,
         date_of_birth: data.date_of_birth,
         employment_type: data.employment_type,
-        employment_status: data.employment_status,
-        phone: data.phone,
-      };
-
-      await apiClient.createEmployee(employeeData);
-
-      const response = await apiClient.getEmployees();
-      const refreshedData = Array.isArray(response.data)
-        ? (response.data as unknown[])
-        : [];
-      const refreshedEmployees = refreshedData.map((emp) => {
-        const record = emp as Record<string, unknown>;
-        return {
-          ...record,
-          name:
-            (record.name as string) ||
-            `${(record.first_name as string) || ""} ${(record.last_name as string) || ""}`.trim(),
-          joining_date: record.joining_date
-            ? String(record.joining_date)
-            : undefined,
-          type: record.type as "Full-time" | "Contract" | "Part-time",
-        } as Employee;
       });
-      setEmployees(refreshedEmployees);
+
+      // FIX: refresh via normalizeEmployee, not a hand-rolled map
+      const refreshRes = await apiClient.getEmployees();
+      const raw: EmployeeAPI[] = Array.isArray(refreshRes.data)
+        ? refreshRes.data
+        : [];
+      setEmployees(raw.map(normalizeEmployee));
+
       reset();
       setAddDialog(false);
-      toast({
-        title: "Success",
-        description: `${first_name} has been added.`,
-      });
+      toast({ title: "Success", description: `${first_name} has been added.` });
     } catch (error: unknown) {
-      const errorMessage =
-        error instanceof Error ? error.message : "Failed to add employee";
       toast({
         title: "Error",
-        description: errorMessage,
+        description:
+          error instanceof Error ? error.message : "Failed to add employee",
       });
     }
   };
 
+  // ── Delete employee ────────────────────────────────────────────────────────
   const handleDeleteEmployee = async (id: string) => {
     try {
       await apiClient.deleteEmployee(id);
       setEmployees((prev) => prev.filter((e) => e.id !== id));
       toast({ title: "Success", description: "Employee removed" });
     } catch (error: unknown) {
-      const errorMessage =
-        error instanceof Error ? error.message : "Failed to delete employee";
       toast({
         title: "Error",
-        description: errorMessage,
+        description:
+          error instanceof Error ? error.message : "Failed to delete employee",
       });
     }
   };
 
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <motion.div
       variants={container}
@@ -465,7 +475,6 @@ export default function EmployeeList() {
                   )}
                 </div>
                 <div>
-                  {" "}
                   <label className="text-xs text-muted-foreground mb-1 block">
                     Date of Joining *
                   </label>
@@ -480,7 +489,7 @@ export default function EmployeeList() {
                     </p>
                   )}
                 </div>
-              </div>{" "}
+              </div>
               <div className="flex justify-end gap-2 pt-2">
                 <Button
                   variant="outline"
@@ -562,6 +571,35 @@ export default function EmployeeList() {
                 </SelectContent>
               </Select>
             </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">Status:</span>
+              <Select value={filterStatus} onValueChange={setFilterStatus}>
+                <SelectTrigger className="h-7 text-xs w-36">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Statuses</SelectItem>
+                  <SelectItem value="active">Active</SelectItem>
+                  <SelectItem value="notice_period">Notice Period</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">Type:</span>
+              <Select value={filterType} onValueChange={setFilterType}>
+                <SelectTrigger className="h-7 text-xs w-36">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Types</SelectItem>
+                  {types.map((t) => (
+                    <SelectItem key={t} value={t}>
+                      {t}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </motion.div>
         )}
       </motion.div>
@@ -581,19 +619,16 @@ export default function EmployeeList() {
               <tr>
                 <th>
                   <button
-                    className=" flex gap-3"
+                    className="flex gap-3"
                     onClick={() => {
                       setSortEmployeeName(null);
                       setSortEmployeeId((prev) =>
-                        prev === "asc"
-                          ? "desc"
-                          : prev === "desc"
-                            ? null
-                            : "asc",
+                        prev === "asc" ? "desc" : prev === "desc" ? null : "asc",
                       );
                     }}
                   >
-                    ASSET ID
+                    {/* FIX: label was "ASSET ID" — corrected to EMPLOYEE ID */}
+                    EMPLOYEE ID
                     {sortEmployeeId === "asc" ? (
                       <ArrowUp className="w-5 h-5 text-primary" />
                     ) : sortEmployeeId === "desc" ? (
@@ -609,11 +644,7 @@ export default function EmployeeList() {
                     onClick={() => {
                       setSortEmployeeId(null);
                       setSortEmployeeName((prev) =>
-                        prev === "asc"
-                          ? "desc"
-                          : prev === "desc"
-                            ? null
-                            : "asc",
+                        prev === "asc" ? "desc" : prev === "desc" ? null : "asc",
                       );
                     }}
                   >
@@ -630,98 +661,110 @@ export default function EmployeeList() {
                 <th>Department</th>
                 <th>Position</th>
                 <th>Email</th>
+                {/* FIX: column was rendering emp.phone but labelled "Joined" */}
                 <th>Joined</th>
                 <th>Status</th>
                 <th className="w-10"></th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map((emp) => (
-                <tr key={emp.id} className="cursor-pointer">
-                  <td className="font-mono-data text-xs text-muted-foreground">
-                    {emp.employee_id}
-                  </td>
-                  <td>
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-7 h-7 rounded-md bg-primary/10 flex items-center justify-center text-[10px] font-medium text-primary shrink-0 overflow-hidden">
-                        {emp.profile_image ? (
-                          <img
-                            src={emp.profile_image}
-                            alt={emp.name}
-                            className="w-full h-full object-cover"
-                          />
-                        ) : (
-                          (
-                            emp.name ||
-                            `${emp.first_name || ""} ${emp.last_name || ""}`.trim() ||
-                            "E"
-                          )
-                            .split(" ")
-                            .map((n) => n[0])
-                            .join("")
-                        )}
-                      </div>
-                      <div>
+              {filtered.map((emp) => {
+                const dept = getDeptName(emp);
+                const designation = getDesignation(emp);
+                const joiningDate = getJoiningDate(emp);
+                const status = getEmploymentStatus(emp);
+                const initials = emp.name
+                  .split(" ")
+                  .map((n) => n[0])
+                  .join("")
+                  .substring(0, 2)
+                  .toUpperCase();
+
+                return (
+                  <tr key={emp.id} className="cursor-pointer">
+                    <td className="font-mono-data text-xs text-muted-foreground">
+                      {emp.employee_id}
+                    </td>
+                    <td>
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-7 h-7 rounded-md bg-primary/10 flex items-center justify-center text-[10px] font-medium text-primary shrink-0 overflow-hidden">
+                          {emp.profile_image ? (
+                            <img
+                              src={emp.profile_image}
+                              alt={emp.name}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            initials || "E"
+                          )}
+                        </div>
                         <p className="text-sm font-medium leading-none">
-                          {emp.name ||
-                            `${emp.first_name || ""} ${emp.last_name || ""}`.trim()}
+                          {emp.name}
                         </p>
                       </div>
-                    </div>
-                  </td>
-                  <td className="text-sm">{emp.department || "—"}</td>
-                  <td className="text-sm text-muted-foreground">
-                    {emp.position || "—"}
-                  </td>
-                  <td className="text-sm text-muted-foreground">{emp.email}</td>
-                  <td className="font-mono-data text-xs text-muted-foreground">
-                    {emp.phone || "__"}
-                  </td>
-                  <td>
-                    <span
-                      className={`status-pill ${statusClass[emp.employment_status ?? "active"]}`}
-                    >
-                      {emp.employment_status?.replace("_", " ") || "active"}
-                    </span>
-                  </td>
-                  <Protected
-                    anyPermissions={[
-                      EmployeesAction.Edit,
-                      EmployeesAction.Delete,
-                    ]}
-                  >
-                    <td onClick={(e) => e.stopPropagation()}>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <button className="p-1 rounded hover:bg-muted transition-colors">
-                            <MoreHorizontal className="w-4 h-4 text-muted-foreground" />
-                          </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-44">
-                          <DropdownMenuItem
-                            onClick={() => navigate(`/employees/${emp.id}`)}
-                          >
-                            View Profile
-                          </DropdownMenuItem>
-                          <DropdownMenuItem>View Documents</DropdownMenuItem>
-                          <DropdownMenuItem>View Attendance</DropdownMenuItem>
-
-                          <DropdownMenuItem
-                            className="text-destructive"
-                            onClick={() => handleDeleteEmployee(emp.id)}
-                          >
-                            Delete Employee
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
                     </td>
-                  </Protected>
-                </tr>
-              ))}
+                    {/* FIX: all cells now use helpers instead of non-existent flat fields */}
+                    <td className="text-sm">{dept}</td>
+                    <td className="text-sm text-muted-foreground">
+                      {designation}
+                    </td>
+                    <td className="text-sm text-muted-foreground">
+                      {emp.email}
+                    </td>
+                    <td className="font-mono-data text-xs text-muted-foreground">
+                      {joiningDate !== "—"
+                        ? new Date(joiningDate).toLocaleDateString("en", {
+                            year: "numeric",
+                            month: "short",
+                            day: "numeric",
+                          })
+                        : "—"}
+                    </td>
+                    <td>
+                      <span
+                        className={`status-pill ${statusClass[status] ?? "active"}`}
+                      >
+                        {status.replace("_", " ")}
+                      </span>
+                    </td>
+                    <Protected
+                      anyPermissions={[
+                        EmployeesAction.Edit,
+                        EmployeesAction.Delete,
+                      ]}
+                    >
+                      <td onClick={(e) => e.stopPropagation()}>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <button className="p-1 rounded hover:bg-muted transition-colors">
+                              <MoreHorizontal className="w-4 h-4 text-muted-foreground" />
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-44">
+                            <DropdownMenuItem
+                              onClick={() => navigate(`/employees/${emp.id}`)}
+                            >
+                              View Profile
+                            </DropdownMenuItem>
+                            <DropdownMenuItem>View Documents</DropdownMenuItem>
+                            <DropdownMenuItem>View Attendance</DropdownMenuItem>
+                            <DropdownMenuItem
+                              className="text-destructive"
+                              onClick={() => handleDeleteEmployee(emp.id)}
+                            >
+                              Delete Employee
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </td>
+                    </Protected>
+                  </tr>
+                );
+              })}
               {filtered.length === 0 && !loading && (
                 <tr>
                   <td
-                    colSpan={7}
+                    colSpan={8}
                     className="text-center text-sm text-muted-foreground py-8"
                   >
                     No employees found.

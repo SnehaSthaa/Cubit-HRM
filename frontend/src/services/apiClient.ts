@@ -1,11 +1,17 @@
+// src/services/apiClient.ts
 import {
-  EmergencyContact,
   Employee,
+  EmployeeAPI,
+  EmergencyContact,
   EmployeeDocument,
   LeaveBalance,
-} from "@/types";
+  CreateEmployeePayload,
+  UpdateEmployeePayload,
+  PersonalDetail,
+  DepartmentRecord,
+  BankDetail,
+} from "@/types/index";
 import axios, { AxiosInstance } from "axios";
-import { Form } from "react-router-dom";
 
 const API_BASE_URL =
   import.meta.env.VITE_API_URL || "http://localhost:3000/api";
@@ -16,21 +22,9 @@ export interface ApiResponse<T = unknown> {
   role?: string;
   data?: T;
   error?: string;
+  errors?: Record<string, string[]>;
 }
-type MeEmployee = Employee & {
-  emergencyContacts: EmergencyContact[];
-  leaveBalances: LeaveBalance[];
-  documents: EmployeeDocument[];
-  assets: AssetApi[];
-};
-export type DocumentStatus = "Verified" | "Rejected" | "Pending";
-interface HolidayApi {
-  id: string;
-  start_date: string;
-  end_date: string;
-  name: string;
-  holiday_type: "public" | "company" | "regional" | "religious";
-}
+
 type LoginResponse = {
   user: {
     id: string;
@@ -40,6 +34,7 @@ type LoginResponse = {
   };
   token: string;
 };
+
 export type TakeHomeRequestApi = {
   id: string;
   start_date: string;
@@ -53,7 +48,6 @@ export type TakeHomeRequestApi = {
     asset_id: string;
     name: string;
     reviewed_by_user_id: string | null;
-
     reviewer: {
       id: string;
       name: string;
@@ -65,6 +59,7 @@ export type TakeHomeRequestApi = {
     } | null;
   };
 };
+
 export interface ProRataDebugResult {
   joining_date: string;
   annual_quota: number;
@@ -72,6 +67,25 @@ export interface ProRataDebugResult {
   this_year: { month: string; accrued: number }[];
   next_year_jan1: { month: string; accrued: number };
 }
+
+type UploadProfileImageResponse = {
+  profile_image: string;
+};
+
+export interface ApiError extends Error {
+  fields?: Record<string, string[]>;
+}
+
+type MeEmployee = Employee & {
+  personal_details: PersonalDetail[];
+  department: DepartmentRecord[];
+  bank_details: BankDetail[];
+  emergencyContacts: EmergencyContact[];
+  leaveBalances: LeaveBalance[];
+  documents: EmployeeDocument[];
+  assets: AssetApi[];
+};
+
 export interface AssetApi {
   id: string;
   asset_id: string;
@@ -86,12 +100,11 @@ export interface AssetApi {
   location?: string | null;
   notes?: string | null;
   reason?: string | null;
-  reveiwed_at?: string | null; // ✅ exact schema typo
+  reveiwed_at?: string | null;
   assigned_to?: string | null;
   reviewed_by_user_id?: string | null;
   created_at?: string;
   updated_at?: string;
-
   employee?: {
     id: string;
     first_name: string;
@@ -102,10 +115,10 @@ export interface AssetApi {
     id: string;
     name: string;
   } | null;
-
   type?: string;
   condition?: string | null;
 }
+
 export interface LeaveData {
   id: string;
   employee_id: string;
@@ -113,7 +126,20 @@ export interface LeaveData {
   end_date: string;
   status: string;
   days_count: number;
+  personal_details?: {
+    first_name: string;
+    last_name: string;
+  };
+  department?: DepartmentRecord;
+  leave_type?: string;
+  reason?: string;
+  created_at?: string;
+  approved_by?: string;
+  approval_notes?: string;
+  rejection_reason?: string;
+  remarks?: string;
 }
+
 export interface LeavePolicyApi {
   id: string;
   name: string;
@@ -125,49 +151,51 @@ export interface LeavePolicyApi {
   description?: string;
   active: boolean;
 }
-type UploadProfileImageResponse = {
-  profile_image: string;
-};
+
+export type DocumentStatus = "Verified" | "Rejected" | "Pending";
+
+interface HolidayApi {
+  id: string;
+  start_date: string;
+  end_date: string;
+  name: string;
+  holiday_type: "public" | "company" | "regional" | "religious";
+}
 
 class ApiClient {
   private client: AxiosInstance;
 
   constructor() {
-    const baseUrl = API_BASE_URL;
     this.client = axios.create({
-      baseURL: baseUrl,
-      headers: {
-        "Content-Type": "application/json",
-      },
+      baseURL: API_BASE_URL,
+      headers: { "Content-Type": "application/json" },
     });
 
     this.client.interceptors.request.use((config) => {
       const token = localStorage.getItem("access_token");
-
-      if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
-      }
-
+      if (token) config.headers.Authorization = `Bearer ${token}`;
       return config;
     });
 
     this.client.interceptors.response.use(
       (res) => res,
       (error) => {
-        const message =
-          error.response?.data?.message || error.message || "Unknown API error";
-
-        return Promise.reject(new Error(message));
+        const data = error.response?.data;
+        const message = data?.message || error.message || "Unknown API error";
+        const err = new Error(message) as ApiError;
+        if (data?.errors) err.fields = data.errors;
+        return Promise.reject(err);
       },
     );
   }
 
   private async parse<T>(promise: Promise<{ data: ApiResponse<T> }>) {
     const response = await promise;
-    return response.data; // ApiResponse<T>
+    return response.data;
   }
 
-  // ---------------- AUTH ----------------
+  // ── AUTH ──────────────────────────────────────────────────────────────────
+
   login(email: string, password: string) {
     return this.parse<LoginResponse>(
       this.client.post<ApiResponse<LoginResponse>>("/auth/login", {
@@ -186,6 +214,7 @@ class ApiClient {
       }),
     );
   }
+
   getMe() {
     return this.parse<{
       user: {
@@ -199,6 +228,7 @@ class ApiClient {
       employee?: MeEmployee;
     }>(this.client.get("/users/me"));
   }
+
   changePassword(data: {
     currentPassword: string;
     newPassword: string;
@@ -208,6 +238,7 @@ class ApiClient {
       this.client.patch<ApiResponse>("/users/me/change-password", data),
     );
   }
+
   switchRole(role: string) {
     return this.parse<{ token: string; activeRole: string }>(
       this.client.post<ApiResponse<{ token: string; activeRole: string }>>(
@@ -216,19 +247,23 @@ class ApiClient {
       ),
     );
   }
+
   assignRole(userId: string, role: string) {
     return this.parse(this.client.post(`/users/assign-role`, { userId, role }));
   }
+
   removeRole(userId: string, role: string) {
     return this.parse(
       this.client.delete(`/users/remove-role`, { data: { userId, role } }),
     );
   }
 
-  //----------------PERMISSIONS----------------
+  // ── PERMISSIONS ───────────────────────────────────────────────────────────
+
   getPermissionByRole(role: string) {
     return this.parse(this.client.get<ApiResponse>(`/permissions/${role}`));
   }
+
   updatePermissionByRole(
     role: string,
     permissions: Record<string, Record<string, boolean>>,
@@ -237,92 +272,80 @@ class ApiClient {
       this.client.put<ApiResponse>(`/permissions/${role}`, { permissions }),
     );
   }
-  // ---------------- EMPLOYEES ----------------
+
+  // ── EMPLOYEES ─────────────────────────────────────────────────────────────
+
   getEmployees() {
-    return this.parse<Employee[]>(
-      this.client.get<ApiResponse<Employee[]>>("/employees"),
+    return this.parse<EmployeeAPI[]>(
+      this.client.get<ApiResponse<EmployeeAPI[]>>("/employees"),
     );
   }
 
   getEmployee(id: string) {
-    return this.parse<Employee>(
-      this.client.get<ApiResponse<Employee>>(`/employees/${id}`),
+    return this.parse<EmployeeAPI>(
+      this.client.get<ApiResponse<EmployeeAPI>>(`/employees/${id}`),
     );
   }
-  createEmployee(data: Record<string, unknown>) {
-    return this.parse(this.client.post<ApiResponse>("/employees", data));
+
+  createEmployee(data: CreateEmployeePayload) {
+    return this.parse<EmployeeAPI>(
+      this.client.post<ApiResponse<EmployeeAPI>>("/employees", data),
+    );
   }
 
-  updateEmployee(id: string, data: Record<string, unknown>) {
-    return this.parse(this.client.put<ApiResponse>(`/employees/${id}`, data));
+  updateEmployee(id: string, data: UpdateEmployeePayload) {
+    return this.parse<EmployeeAPI>(
+      this.client.put<ApiResponse<EmployeeAPI>>(`/employees/${id}`, data),
+    );
   }
+
   verifyEmployee(id: string) {
-    return this.parse(this.client.patch(`/employees/${id}/verify`));
+    return this.parse<EmployeeAPI>(
+      this.client.patch<ApiResponse<EmployeeAPI>>(`/employees/${id}/verify`),
+    );
   }
+
   deleteEmployee(id: string) {
-    return this.parse(this.client.delete<ApiResponse>(`/employees/${id}`));
+    return this.parse<void>(
+      this.client.delete<ApiResponse<void>>(`/employees/${id}`),
+    );
   }
+
   uploadEmployeeProfileImage(id: string, file: File) {
     const formData = new FormData();
     formData.append("file", file);
-
-    return this.parse(
+    return this.parse<UploadProfileImageResponse>(
       this.client.post<ApiResponse<UploadProfileImageResponse>>(
         `/employees/${id}/profile-image`,
         formData,
-        {
-          headers: {
-            "Content-Type": "multipart/form-data",
-          },
-        },
-      ),
-    );
-  }
-  // ---------------- LEAVES ----------------
-  getLeaves() {
-    return this.parse(this.client.get<ApiResponse<LeaveData[]>>("/leaves"));
-  }
-  getLeavesByEmployee(employeeId: string) {
-    return this.parse(
-      this.client.get<ApiResponse<LeaveData[]>>(
-        `/leaves/employee/${employeeId}`,
+        { headers: { "Content-Type": "multipart/form-data" } },
       ),
     );
   }
 
-  createLeave(data: Record<string, unknown>) {
-    return this.parse(this.client.post<ApiResponse>("/leaves", data));
-  }
+  // ── PERSONAL DETAILS ──────────────────────────────────────────────────────
 
-  updateLeave(id: string, data: Record<string, unknown>) {
-    return this.parse(this.client.put<ApiResponse>(`/leaves/${id}`, data));
-  }
-  approveLeave(id: string, notes?: string) {
+  getPersonalDetails(employeeId: string) {
     return this.parse(
-      this.client.put<ApiResponse>(`/leaves/${id}/approve`, {
-        approval_notes: notes,
-      }),
+      this.client.get(`/employees/${employeeId}/personal-details`),
     );
   }
 
-  rejectLeave(id: string, notes?: string) {
+  updatePersonalDetails(employeeId: string, data: Record<string, unknown>) {
     return this.parse(
-      this.client.put<ApiResponse>(`/leaves/${id}/reject`, {
-        approval_notes: notes,
-      }),
-    );
-  }
-  getLeaveBalance(employeeId: string) {
-    return this.parse(
-      this.client.get<ApiResponse<LeaveBalance[]>>(
-        `/leaves/balance/${employeeId}`,
-      ),
+      this.client.put(`/employees/${employeeId}/personal-details`, data),
     );
   }
 
-  getAllLeaveBalances() {
+  // ── BANK DETAILS ──────────────────────────────────────────────────────────
+
+  getBankDetails(employeeId: string) {
+    return this.parse(this.client.get(`/employees/${employeeId}/bank-details`));
+  }
+
+  upsertBankDetails(employeeId: string, data: Record<string, unknown>) {
     return this.parse(
-      this.client.get<ApiResponse<LeaveBalance[]>>("/leaves/balance"),
+      this.client.put(`/employees/${employeeId}/bank-details`, data),
     );
   }
 
@@ -336,9 +359,7 @@ class ApiClient {
       this.client.patch<ApiResponse>("/leaves/balance/customize", data),
     );
   }
-  deleteLeave(id: string) {
-    return this.parse(this.client.delete<ApiResponse>(`/leaves/${id}`));
-  }
+
   exportLeaves(params?: {
     month?: string;
     leave_type?: string;
@@ -356,9 +377,11 @@ class ApiClient {
       responseType: "blob",
     });
   }
-  //--------------Emergency Contacts-------------
+
+  // ── EMERGENCY CONTACTS ────────────────────────────────────────────────────
+
   getEmergencyContacts(employeeId: string) {
-    return this.parse(
+    return this.parse<EmergencyContact[]>(
       this.client.get<ApiResponse<EmergencyContact[]>>(
         `/employees/${employeeId}/emergency-contacts`,
       ),
@@ -367,52 +390,53 @@ class ApiClient {
 
   addEmergencyContact(employeeId: string, data: Record<string, unknown>) {
     return this.parse<EmergencyContact>(
-      this.client.post(`/employees/${employeeId}/emergency-contacts`, data),
+      this.client.post<ApiResponse<EmergencyContact>>(
+        `/employees/${employeeId}/emergency-contacts`,
+        data,
+      ),
     );
   }
 
-  updateEmergencyContact(
-    employeeId: string,
-    contactId: string,
-    data: Record<string, unknown>,
-  ) {
+  updateEmergencyContact(contactId: string, data: Record<string, unknown>) {
     return this.parse<EmergencyContact>(
-      this.client.patch(`/employees/emergency-contacts/${contactId}`, data),
+      this.client.patch<ApiResponse<EmergencyContact>>(
+        `/employees/emergency-contacts/${contactId}`,
+        data,
+      ),
     );
   }
 
-  deleteEmergencyContact(employeeId: string, contactId: string) {
-    return this.parse(
-      this.client.delete<ApiResponse<EmergencyContact>>(
+  deleteEmergencyContact(contactId: string) {
+    return this.parse<void>(
+      this.client.delete<ApiResponse<void>>(
         `/employees/emergency-contacts/${contactId}`,
       ),
     );
   }
-  // ---------------- DOCUMENTS ----------------
 
-  // DOCUMENTS
+  // ── DOCUMENTS ─────────────────────────────────────────────────────────────
+
   getDocuments(employeeId: string) {
-    return this.parse(
+    return this.parse<EmployeeDocument[]>(
       this.client.get<ApiResponse<EmployeeDocument[]>>(
         `/employee-documents/${employeeId}/documents`,
       ),
     );
   }
+
   uploadDocument(employeeId: string, formData: FormData) {
-    return this.parse(
-      this.client.post(
+    return this.parse<EmployeeDocument>(
+      this.client.post<ApiResponse<EmployeeDocument>>(
         `/employee-documents/${employeeId}/documents`,
         formData,
-        {
-          headers: { "Content-Type": "multipart/form-data" },
-        },
+        { headers: { "Content-Type": "multipart/form-data" } },
       ),
     );
   }
 
-  updateDocumentStatus(docId: string, status: "Verified" | "Rejected") {
-    return this.parse(
-      this.client.patch<ApiResponse>(
+  updateDocumentStatus(docId: string, status: DocumentStatus) {
+    return this.parse<EmployeeDocument>(
+      this.client.patch<ApiResponse<EmployeeDocument>>(
         `/employee-documents/documents/${docId}/status`,
         { status },
       ),
@@ -420,35 +444,112 @@ class ApiClient {
   }
 
   deleteDocument(docId: string) {
-    return this.parse(
-      this.client.delete<ApiResponse>(`/employee-documents/documents/${docId}`),
+    return this.parse<void>(
+      this.client.delete<ApiResponse<void>>(
+        `/employee-documents/documents/${docId}`,
+      ),
     );
   }
-  // ---------------- LEAVE POLICIES ----------------
+
+  // ── LEAVES ────────────────────────────────────────────────────────────────
+
+  getLeaves() {
+    return this.parse<LeaveData[]>(
+      this.client.get<ApiResponse<LeaveData[]>>("/leaves"),
+    );
+  }
+
+  getLeavesByEmployee(employeeId: string) {
+    return this.parse<LeaveData[]>(
+      this.client.get<ApiResponse<LeaveData[]>>(
+        `/leaves/employee/${employeeId}`,
+      ),
+    );
+  }
+
+  createLeave(data: Record<string, unknown>) {
+    return this.parse<LeaveData>(
+      this.client.post<ApiResponse<LeaveData>>("/leaves", data),
+    );
+  }
+
+  updateLeave(id: string, data: Record<string, unknown>) {
+    return this.parse<LeaveData>(
+      this.client.put<ApiResponse<LeaveData>>(`/leaves/${id}`, data),
+    );
+  }
+
+  approveLeave(id: string, notes?: string) {
+    return this.parse<LeaveData>(
+      this.client.put<ApiResponse<LeaveData>>(`/leaves/${id}/approve`, {
+        approval_notes: notes,
+      }),
+    );
+  }
+
+  rejectLeave(id: string, notes?: string) {
+    return this.parse<LeaveData>(
+      this.client.put<ApiResponse<LeaveData>>(`/leaves/${id}/reject`, {
+        approval_notes: notes,
+      }),
+    );
+  }
+
+  deleteLeave(id: string) {
+    return this.parse<void>(
+      this.client.delete<ApiResponse<void>>(`/leaves/${id}`),
+    );
+  }
+
+  getLeaveBalance(employeeId: string) {
+    return this.parse<LeaveBalance[]>(
+      this.client.get<ApiResponse<LeaveBalance[]>>(
+        `/leaves/balance/${employeeId}`,
+      ),
+    );
+  }
+
+  getAllLeaveBalances() {
+    return this.parse<LeaveBalance[]>(
+      this.client.get<ApiResponse<LeaveBalance[]>>("/leaves/balance"),
+    );
+  }
+
+  // ── LEAVE POLICIES ────────────────────────────────────────────────────────
 
   getPolicies() {
-    return this.parse(
+    return this.parse<LeavePolicyApi[]>(
       this.client.get<ApiResponse<LeavePolicyApi[]>>("/leave-policies"),
     );
   }
 
   createPolicy(data: Record<string, unknown>) {
-    return this.parse(this.client.post<ApiResponse>("/leave-policies", data));
+    return this.parse<LeavePolicyApi>(
+      this.client.post<ApiResponse<LeavePolicyApi>>("/leave-policies", data),
+    );
   }
 
   updatePolicy(id: string, data: Record<string, unknown>) {
-    return this.parse(
-      this.client.put<ApiResponse>(`/leave-policies/${id}`, data),
+    return this.parse<LeavePolicyApi>(
+      this.client.put<ApiResponse<LeavePolicyApi>>(
+        `/leave-policies/${id}`,
+        data,
+      ),
     );
   }
 
   deletePolicy(id: string) {
-    return this.parse(this.client.delete<ApiResponse>(`/leave-policies/${id}`));
+    return this.parse<void>(
+      this.client.delete<ApiResponse<void>>(`/leave-policies/${id}`),
+    );
   }
-  // ---------------- HOLIDAYS ----------------
+
+  // ── HOLIDAYS ──────────────────────────────────────────────────────────────
 
   getHolidays() {
-    return this.parse(this.client.get<ApiResponse<HolidayApi[]>>("/holidays"));
+    return this.parse<HolidayApi[]>(
+      this.client.get<ApiResponse<HolidayApi[]>>("/holidays"),
+    );
   }
 
   createHoliday(data: {
@@ -457,11 +558,9 @@ class ApiClient {
     end_date: string;
     holiday_type: string;
   }) {
-    return this.parse(this.client.post<ApiResponse>("/holidays", data));
-  }
-
-  deleteHoliday(id: string) {
-    return this.parse(this.client.delete<ApiResponse>(`/holidays/${id}`));
+    return this.parse<HolidayApi>(
+      this.client.post<ApiResponse<HolidayApi>>("/holidays", data),
+    );
   }
 
   updateHoliday(
@@ -473,10 +572,19 @@ class ApiClient {
       holiday_type: string;
     }>,
   ) {
-    return this.parse(this.client.put<ApiResponse>(`/holidays/${id}`, data));
+    return this.parse<HolidayApi>(
+      this.client.put<ApiResponse<HolidayApi>>(`/holidays/${id}`, data),
+    );
   }
 
-  // ---------------- ASSETS ----------------
+  deleteHoliday(id: string) {
+    return this.parse<void>(
+      this.client.delete<ApiResponse<void>>(`/holidays/${id}`),
+    );
+  }
+
+  // ── ASSETS ────────────────────────────────────────────────────────────────
+
   getAssets(filters?: Record<string, unknown>) {
     return this.parse<AssetApi[]>(
       this.client.get<ApiResponse<AssetApi[]>>("/assets", { params: filters }),
@@ -484,12 +592,14 @@ class ApiClient {
   }
 
   createAsset(data: Record<string, unknown>) {
-    return this.parse(this.client.post<ApiResponse>("/assets", data));
+    return this.parse<AssetApi>(
+      this.client.post<ApiResponse<AssetApi>>("/assets", data),
+    );
   }
 
   assignAsset(id: string, employeeId: string, data?: Record<string, unknown>) {
-    return this.parse(
-      this.client.patch<ApiResponse>(`/assets/${id}/assign`, {
+    return this.parse<AssetApi>(
+      this.client.patch<ApiResponse<AssetApi>>(`/assets/${id}/assign`, {
         assigned_to: employeeId,
         ...data,
       }),
@@ -513,23 +623,20 @@ class ApiClient {
       this.client.put<ApiResponse<void>>(`/assets/${id}`, data),
     );
   }
+
   exportAssets() {
-    return this.client.get("/assets/export", {
-      responseType: "blob",
-    });
+    return this.client.get("/assets/export", { responseType: "blob" });
   }
+
   importAssets(file: File) {
     const formData = new FormData();
     formData.append("file", file);
-
     return this.client.post("/assets/import", formData, {
-      headers: {
-        "Content-Type": "multipart/form-data",
-      },
+      headers: { "Content-Type": "multipart/form-data" },
     });
   }
 
-  // ---------------- TAKE-HOME REQUESTS ----------------
+  // ── TAKE-HOME REQUESTS ────────────────────────────────────────────────────
 
   createTakeHomeAssetRequest(
     assetId: string,
@@ -560,10 +667,11 @@ class ApiClient {
     );
   }
 
-  // Offboarding
+  // ── OFFBOARDING ───────────────────────────────────────────────────────────
+
   getOffboardingEmployees() {
-    return this.parse<Employee[]>(
-      this.client.get<ApiResponse<Employee[]>>("/offboarding"),
+    return this.parse<EmployeeAPI[]>(
+      this.client.get<ApiResponse<EmployeeAPI[]>>("/offboarding"),
     );
   }
 
@@ -574,6 +682,7 @@ class ApiClient {
       ),
     );
   }
+
   completeOffboarding(employeeId: string) {
     return this.parse(
       this.client.patch<ApiResponse>(`/offboarding/${employeeId}/complete`),

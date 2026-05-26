@@ -6,6 +6,7 @@ import {
   sendLeaveApprovedEmail,
   sendLeaveRejectedEmail,
 } from "@/utils/mailer.js";
+
 function calcProRataTotal(
   joiningDate: Date,
   annualQuota: number,
@@ -31,6 +32,16 @@ function calcProRataTotal(
   return Math.min(monthsAccrued, annualQuota);
 }
 
+// Helper: get the most recent joining_date from an employee's department array
+function getLatestJoiningDate(
+  departments: { joining_date: Date }[],
+): Date | null {
+  if (!departments.length) return null;
+  return departments.reduce((latest, d) =>
+    d.joining_date > latest.joining_date ? d : latest,
+  ).joining_date;
+}
+
 export class LeaveController {
   // =========================
   // GET ALL LEAVES
@@ -46,7 +57,13 @@ export class LeaveController {
       const leaves = await prisma.leave.findMany({
         where,
         include: {
-          employee: { include: { user: true } },
+          employee: {
+            include: {
+              user: true,
+              personal_details: true,
+              department: { orderBy: { joining_date: "desc" } },
+            },
+          },
           leaveType: true,
         },
         orderBy: { created_at: "desc" },
@@ -137,6 +154,9 @@ export class LeaveController {
     }
   }
 
+  // =========================
+  // APPROVE LEAVE
+  // =========================
   static async approve(req: Request, res: Response<ApiResponse>) {
     try {
       const { id } = req.params;
@@ -187,17 +207,21 @@ export class LeaveController {
         });
 
         if (!balance) {
+          // FIX: joining_date lives on Department, not Employee
           const employee = await tx.employee.findUnique({
             where: { id: leave.employee_id },
+            include: {
+              department: { orderBy: { joining_date: "asc" }, take: 1 },
+            },
           });
           if (!employee) throw new Error("Employee not found");
 
+          const joiningDate = getLatestJoiningDate(employee.department);
+          if (!joiningDate)
+            throw new Error("Employee has no department/joining date");
+
           const total = policy.pro_rata
-            ? calcProRataTotal(
-                new Date(employee.joining_date),
-                policy.annual_quota,
-                year,
-              )
+            ? calcProRataTotal(joiningDate, policy.annual_quota, year)
             : policy.annual_quota;
 
           balance = await tx.leaveBalance.create({
@@ -275,6 +299,9 @@ export class LeaveController {
     }
   }
 
+  // =========================
+  // REJECT LEAVE
+  // =========================
   static async reject(req: Request, res: Response<ApiResponse>) {
     try {
       const { id } = req.params;
@@ -411,9 +438,17 @@ export class LeaveController {
 
       const year = new Date().getFullYear();
 
+      // FIX: joining_date lives on Department, not Employee
       const employee = await prisma.employee.findUnique({
         where: { id: employeeId },
-        select: { id: true, joining_date: true },
+        select: {
+          id: true,
+          department: {
+            orderBy: { joining_date: "asc" },
+            take: 1,
+            select: { joining_date: true },
+          },
+        },
       });
 
       if (!employee) {
@@ -422,6 +457,8 @@ export class LeaveController {
           message: "Employee not found",
         });
       }
+
+      const joiningDate = employee.department[0]?.joining_date ?? null;
 
       const policies = await prisma.leavePolicy.findMany({
         where: { active: true },
@@ -438,9 +475,9 @@ export class LeaveController {
         let accrued: number;
         if (balance) {
           accrued = Number(balance.total);
-        } else if (policy.pro_rata) {
+        } else if (policy.pro_rata && joiningDate) {
           accrued = calcProRataTotal(
-            new Date(employee.joining_date),
+            new Date(joiningDate),
             policy.annual_quota,
             year,
           );
@@ -474,12 +511,18 @@ export class LeaveController {
   // =========================
   // GET ALL BALANCES (HR view)
   // =========================
-
   static async getAllLeaveBalances(req: Request, res: Response<ApiResponse>) {
     try {
       const year = new Date().getFullYear();
 
-      const employees = await prisma.employee.findMany();
+      // FIX: resolved merge conflict — use a single consistent approach
+      // FIX: include personal_details and department (not direct fields on Employee)
+      const employees = await prisma.employee.findMany({
+        include: {
+          personal_details: { select: { first_name: true, last_name: true } },
+          department: { orderBy: { joining_date: "desc" } },
+        },
+      });
 
       const policies = await prisma.leavePolicy.findMany({
         where: { active: true },
@@ -498,13 +541,16 @@ export class LeaveController {
 
           const used = Number(balance?.used ?? 0);
 
-          let total: number;
+          const joiningDate = employee.department.length
+            ? employee.department[employee.department.length - 1].joining_date
+            : null;
 
+          let total: number;
           if (balance) {
             total = Number(balance.total);
-          } else if (policy.pro_rata) {
+          } else if (policy.pro_rata && joiningDate) {
             total = calcProRataTotal(
-              new Date(employee.joining_date),
+              new Date(joiningDate),
               policy.annual_quota,
               year,
             );
@@ -516,9 +562,9 @@ export class LeaveController {
             employee_id: employee.id,
             employee: {
               id: employee.id,
-              first_name: employee.first_name,
-              last_name: employee.last_name,
-              department: employee.department,
+              first_name: employee.personal_details?.first_name ?? "",
+              last_name: employee.personal_details?.last_name ?? "",
+              department: employee.department[0]?.department_name ?? "",
             },
             leave_type: policy.name,
             leave_type_id: policy.id,
@@ -556,7 +602,6 @@ export class LeaveController {
         });
       }
 
-      // ── Allow negative totals: only reject non-numeric values ──
       const totalNum = Number(total);
       if (isNaN(totalNum)) {
         return res.status(400).json({
@@ -574,8 +619,13 @@ export class LeaveController {
           .json({ success: false, message: "Leave policy not found" });
       }
 
+      // FIX: include personal_details and department for the response shape
       const employee = await prisma.employee.findUnique({
         where: { id: employee_id },
+        include: {
+          personal_details: { select: { first_name: true, last_name: true } },
+          department: { orderBy: { joining_date: "desc" }, take: 1 },
+        },
       });
       if (!employee) {
         return res
@@ -610,9 +660,10 @@ export class LeaveController {
           employee_id: balance.employee_id,
           employee: {
             id: employee.id,
-            first_name: employee.first_name,
-            last_name: employee.last_name,
-            department: employee.department,
+            // FIX: first_name/last_name from personal_details, department name from array
+            first_name: employee.personal_details?.first_name ?? "",
+            last_name: employee.personal_details?.last_name ?? "",
+            department: employee.department[0]?.department_name ?? "",
           },
           leave_type: policy.name,
           leave_type_id: balance.leave_type_id,
@@ -729,7 +780,10 @@ export class LeaveController {
       return res.status(500).json({ success: false, message: error.message });
     }
   }
-  //Export leaves to excel
+
+  // =========================
+  // EXPORT LEAVES TO EXCEL
+  // =========================
   static async exportLeaves(req: Request, res: Response) {
     try {
       const { month, leave_type, employee, status } = req.query;
@@ -761,7 +815,13 @@ export class LeaveController {
         where,
         orderBy: { created_at: "desc" },
         include: {
-          employee: { include: { user: true } },
+          employee: {
+            include: {
+              user: true,
+              // FIX: include department to get department_name
+              department: { orderBy: { joining_date: "desc" }, take: 1 },
+            },
+          },
           leaveType: true,
         },
       });
@@ -783,10 +843,10 @@ export class LeaveController {
         approvers.map((u) => [u.id, u.name]),
       );
 
-      // ── Map rows ─────────────────────────────────────────────────────────────
       const data = leaves.map((l) => ({
         Employee: l.employee.user.name,
-        Department: l.employee.department,
+        // FIX: department is an array — get the most recent department_name
+        Department: l.employee.department[0]?.department_name ?? "—",
         LeaveType: l.leaveType.name,
         FromDate: new Date(l.start_date).toISOString().split("T")[0],
         ToDate: new Date(l.end_date).toISOString().split("T")[0],

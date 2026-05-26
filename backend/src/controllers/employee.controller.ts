@@ -1,41 +1,103 @@
-import { Request, Response } from "express";
+import { NextFunction, Request, Response } from "express";
 import bcrypt from "bcrypt";
 import { prisma } from "../db/prisma.js";
-import { ApiResponse, Employee } from "../types/index.js";
-
-import { minioClient, MINIO_BASE_URL, ensureBucket } from "@/utils/minio.js";
+import { ApiResponse } from "../types/index.js";
 import { sendWelcomeEmail } from "@/utils/mailer.js";
 import { generateRandomPassword } from "@/utils/generatePassword.js";
 import { EmploymentStatus } from "@prisma/client";
+import { minioClient, MINIO_BASE_URL, ensureBucket } from "@/utils/minio.js";
+
 const EMPLOYEE_FILES_BUCKET = "employee-files";
 
+// Valid values from the MunicipalityType enum in schema.prisma
+const VALID_MUNICIPALITY_TYPES = [
+  "metropolitian",
+  "sub_metropolitian",
+  "municipality",
+  "rural_municipality",
+] as const;
+
+type MunicipalityType = (typeof VALID_MUNICIPALITY_TYPES)[number];
+
+function parseMunicipality(value: unknown): MunicipalityType | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (VALID_MUNICIPALITY_TYPES.includes(value as MunicipalityType)) {
+    return value as MunicipalityType;
+  }
+  throw new Error(
+    `Invalid municipality type "${value}". Must be one of: ${VALID_MUNICIPALITY_TYPES.join(", ")}`,
+  );
+}
+
 export class EmployeeController {
+  // ── GET /employees ───────────────────────────────────────────────────────
   static async getAll(req: Request, res: Response<ApiResponse>) {
     try {
-      const employees = await prisma.employee.findMany({
-        include: {
-          user: true,
-          manager: true,
-          assets: true,
-          emergencyContacts: true,
-          documents: true,
-        },
-      });
-      const normalizedEmployees = employees.map((e) => ({
-        ...e,
-        email: e.user?.email ?? e.email,
-        name: `${e.first_name} ${e.last_name}`.trim(),
-      }));
+      const {
+        device_mapping,
+        page = "1",
+        limit = "20",
+      } = req.query as Record<string, string>;
+
+      const skip = (parseInt(page) - 1) * parseInt(limit);
+      const take = parseInt(limit);
+
+      const where: any = {};
+      if (device_mapping === "null") {
+        where.deviceMappings = { none: {} };
+      } else if (device_mapping === "mapped") {
+        where.deviceMappings = { some: {} };
+      }
+
+      const [employees, total] = await Promise.all([
+        prisma.employee.findMany({
+          where,
+          skip,
+          take,
+          orderBy: { created_at: "desc" },
+          include: {
+            user: true,
+            manager: { include: { personal_details: true } },
+            personal_details: true,
+            department: { orderBy: { joining_date: "desc" } },
+            bank_details: true,
+            assets: true,
+            emergencyContacts: true,
+            documents: true,
+            deviceMappings: {
+              include: {
+                device: {
+                  select: {
+                    serial_number: true,
+                    device_name: true,
+                    location: true,
+                    is_active: true,
+                  },
+                },
+              },
+            },
+          },
+        }),
+        prisma.employee.count({ where }),
+      ]);
+
       res.json({
         success: true,
         message: "Employees retrieved",
-        data: normalizedEmployees,
-      });
+        data: employees,
+        meta: {
+          total,
+          page: parseInt(page),
+          limit: take,
+          total_pages: Math.ceil(total / take),
+        },
+      } as any);
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });
     }
   }
 
+  // ── GET /employees/:id ───────────────────────────────────────────────────
   static async getById(req: Request, res: Response<ApiResponse>) {
     try {
       const { id } = req.params;
@@ -43,71 +105,96 @@ export class EmployeeController {
         where: { id },
         include: {
           user: true,
-          manager: true,
+          manager: { include: { personal_details: true } },
+          personal_details: true,
+          department: { orderBy: { joining_date: "desc" } },
+          bank_details: true,
           assets: true,
           emergencyContacts: true,
           documents: true,
+          deviceMappings: {
+            include: {
+              device: {
+                select: {
+                  serial_number: true,
+                  device_name: true,
+                  location: true,
+                  is_active: true,
+                },
+              },
+            },
+          },
         },
       });
-
       if (!employee) {
         return res
           .status(404)
           .json({ success: false, message: "Employee not found" });
       }
-
       res.json({
         success: true,
         message: "Employee retrieved",
-        data: {
-          ...employee,
-          email: employee.user?.email ?? employee.email,
-          name: `${employee.first_name} ${employee.last_name}`.trim(),
-        },
+        data: employee,
       });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });
     }
   }
 
+  // ── POST /employees ──────────────────────────────────────────────────────
   static async create(req: Request, res: Response<ApiResponse>) {
     try {
-      const employeeData: Partial<Employee> = req.body;
+      const body = req.body;
 
       if (
-        !employeeData.email ||
-        !employeeData.first_name ||
-        !employeeData.last_name ||
-        !employeeData.department ||
-        !employeeData.joining_date
+        !body.email ||
+        !body.first_name ||
+        !body.last_name ||
+        !body.department_name ||
+        !body.joining_date
       ) {
         return res
           .status(400)
           .json({ success: false, message: "Missing required fields" });
       }
-
       if (!req.user) {
         return res
           .status(401)
           .json({ success: false, message: "Unauthorized" });
       }
 
-      const existingUser = await prisma.user.findUnique({
-        where: { email: employeeData.email! },
-      });
-
-      if (existingUser) {
-        return res.status(400).json({
-          success: false,
-          message: "Employee email is already in use",
-        });
+      let municipality: MunicipalityType | undefined;
+      try {
+        municipality = parseMunicipality(body.municipality);
+      } catch (e: any) {
+        return res.status(400).json({ success: false, message: e.message });
       }
+
+      if (body.salary !== undefined) {
+        if (!body.account_number || !body.bank_name || !body.branch) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "account_number, bank_name, and branch are required when salary is provided",
+          });
+        }
+      }
+
+      const existingUser = await prisma.user.findUnique({
+        where: { email: body.email },
+      });
+      if (existingUser) {
+        return res
+          .status(400)
+          .json({ success: false, message: "Email already in use" });
+      }
+
       const randomPassword = generateRandomPassword();
       const createdUser = await prisma.user.create({
         data: {
-          email: employeeData.email!,
+          email: body.email,
           password_hash: await bcrypt.hash(randomPassword, 10),
-          name: `${employeeData.first_name} ${employeeData.last_name}`.trim(),
+          name: `${body.first_name} ${body.last_name}`.trim(),
           role: ["employee"],
           is_active: true,
         },
@@ -116,228 +203,429 @@ export class EmployeeController {
       const employee = await prisma.employee.create({
         data: {
           user_id: createdUser.id,
-          employee_id: employeeData.employee_id ?? `EMP-${Date.now()}`,
-          first_name: employeeData.first_name!,
-          last_name: employeeData.last_name!,
-          email: employeeData.email!,
-          department: employeeData.department!,
-          position: employeeData.position ?? "",
-          joining_date: new Date(employeeData.joining_date!),
-          ...(employeeData.date_of_birth && {
-            date_of_birth: new Date(employeeData.date_of_birth),
+          employee_id: body.employee_id ?? `EMP-${Date.now()}`,
+          ...(body.manager_id && { manager_id: body.manager_id }),
+          ...(body.notes && { notes: body.notes }),
+          personal_details: {
+            create: {
+              first_name: body.first_name,
+              last_name: body.last_name,
+              email: body.email,
+              ...(body.phone ? { phone: body.phone } : {}),
+              ...(body.date_of_birth && {
+                date_of_birth: new Date(body.date_of_birth),
+              }),
+              ...(body.gender && { gender: body.gender }),
+              ...(body.marital_status && {
+                marital_status: body.marital_status,
+              }),
+              ...(body.citizenship_number && {
+                citizenship_number: body.citizenship_number,
+              }),
+              ...(body.pan_number && { pan_number: body.pan_number }),
+              ...(body.nid_number && { nid_number: body.nid_number }),
+              ...(body.ssid_number && { ssid_number: body.ssid_number }),
+              ...(body.father_name && { father_name: body.father_name }),
+              ...(body.mother_name && { mother_name: body.mother_name }),
+              ...(body.grandfather_name && {
+                grandfather_name: body.grandfather_name,
+              }),
+              ...(body.current_address && {
+                current_address: body.current_address,
+              }),
+              ...(body.permanent_address && {
+                permanent_address: body.permanent_address,
+              }),
+              ...(body.country && { country: body.country }),
+              ...(body.state && { state: body.state }),
+              ...(body.district && { district: body.district }),
+              ...(body.city && { city: body.city }),
+              ...(municipality !== undefined && { municipality }),
+              ...(body.ward !== undefined && { ward: Number(body.ward) }),
+              ...(body.tole && { tole: body.tole }),
+            },
+          },
+          department: {
+            create: {
+              department_name: body.department_name,
+              joining_date: new Date(body.joining_date),
+              ...(body.hierarchy && { hierarchy: body.hierarchy }),
+              ...(body.previous_experience && {
+                previous_experience: body.previous_experience,
+              }),
+              ...(body.employment_type && {
+                employment_type: body.employment_type,
+              }),
+              ...(body.employment_status && {
+                employment_status: body.employment_status,
+              }),
+              // FIX: schema field is `position`, not `designation`
+              ...(body.position && { position: body.position }),
+              ...(body.level && { level: body.level }),
+            },
+          },
+          ...(body.salary !== undefined && {
+            bank_details: {
+              create: {
+                account_number: body.account_number,
+                salary: body.salary,
+                bank_name: body.bank_name,
+                branch: body.branch,
+                ...(body.contract_type && {
+                  contract_type: body.contract_type,
+                }),
+              },
+            },
           }),
-          ...(employeeData.gender && { gender: employeeData.gender }),
-          ...(employeeData.phone && { phone: employeeData.phone }),
-          ...(employeeData.salary !== undefined && {
-            salary: employeeData.salary,
-          }),
-          ...(employeeData.manager_id && {
-            manager_id: employeeData.manager_id,
-          }),
-          ...(employeeData.current_address && {
-            current_address: employeeData.current_address,
-          }),
-          ...(employeeData.permanent_address && {
-            permanent_address: employeeData.permanent_address,
-          }),
-          ...(employeeData.marital_status && {
-            marital_status: employeeData.marital_status,
-          }),
-          ...(employeeData.father_name && {
-            father_name: employeeData.father_name,
-          }),
-          ...(employeeData.grandfather_name && {
-            grandfather_name: employeeData.grandfather_name,
-          }),
-          ...(employeeData.mother_name && {
-            mother_name: employeeData.mother_name,
-          }),
-          ...(employeeData.previous_experience && {
-            previous_experience: employeeData.previous_experience,
-          }),
-          ...(employeeData.level && { level: employeeData.level }),
-          ...(employeeData.hierarchy && { hierarchy: employeeData.hierarchy }),
-          ...(employeeData.employment_status && {
-            employment_status:
-              employeeData.employment_status as EmploymentStatus,
-          }),
-          ...(employeeData.citizenship_number && {
-            citizenship_number: employeeData.citizenship_number,
-          }),
-          ...(employeeData.pan_number && {
-            pan_number: employeeData.pan_number,
-          }),
-          ...(employeeData.nid_number && {
-            nid_number: employeeData.nid_number,
-          }),
-          ...(employeeData.ssid_number && {
-            ssid_number: employeeData.ssid_number,
-          }),
-          ...(employeeData.contract_type && {
-            contract_type: employeeData.contract_type,
-          }),
-          ...(employeeData.type && { type: employeeData.type }),
-          ...(employeeData.city && { city: employeeData.city }),
-          ...(employeeData.state && { state: employeeData.state }),
-          ...(employeeData.postal_code && {
-            postal_code: employeeData.postal_code,
-          }),
-          ...(employeeData.notes && { notes: employeeData.notes }),
         },
-        include: { user: true, manager: true },
+        include: {
+          user: true,
+          personal_details: true,
+          department: { orderBy: { joining_date: "desc" } },
+          bank_details: true,
+        },
       });
-      try {
-        await sendWelcomeEmail({
-          to: employee.email,
-          name: `${employee.first_name} ${employee.last_name}`,
-          employeeId: employee.employee_id,
-          department: employee.department,
-          position: employee.position,
-          email: employee.email,
-          password: randomPassword,
-        });
-      } catch (mailError) {
-        console.log("Failed to send welcome email:", mailError);
-      }
+
+      await sendWelcomeEmail({
+        to: body.email,
+        name: `${body.first_name} ${body.last_name}`,
+        employeeId: employee.employee_id,
+        department: body.department_name,
+        // FIX: schema field is `position`, not `designation`
+        position: body.position ?? "",
+        email: body.email,
+        password: randomPassword,
+      });
 
       res.status(201).json({
         success: true,
         message: "Employee created",
-        data: {
-          ...employee,
-          name: `${employee.first_name} ${employee.last_name}`.trim(),
-        },
+        data: employee,
       });
     } catch (error: any) {
       res.status(400).json({ success: false, message: error.message });
     }
   }
 
+  // ── PATCH /employees/:id ─────────────────────────────────────────────────
   static async update(req: Request, res: Response<ApiResponse>) {
     try {
       const { id } = req.params;
-      const u = req.body;
-      const data: Record<string, any> = {};
+      const body = req.body;
 
-      // Personal info
-      if (u.first_name !== undefined) data.first_name = u.first_name;
-      if (u.last_name !== undefined) data.last_name = u.last_name;
-      if (u.email !== undefined) data.email = u.email;
-      if (u.phone !== undefined) data.phone = u.phone;
-      if (u.gender !== undefined) data.gender = u.gender;
-      if (u.marital_status !== undefined)
-        data.marital_status = u.marital_status;
-      if (u.father_name !== undefined) data.father_name = u.father_name;
-      if (u.grandfather_name !== undefined)
-        data.grandfather_name = u.grandfather_name;
-      if (u.mother_name !== undefined) data.mother_name = u.mother_name;
-      if (u.current_address !== undefined)
-        data.current_address = u.current_address;
-      if (u.permanent_address !== undefined)
-        data.permanent_address = u.permanent_address;
-      if (u.city !== undefined) data.city = u.city;
-      if (u.state !== undefined) data.state = u.state;
-      if (u.postal_code !== undefined) data.postal_code = u.postal_code;
-      if (u.notes !== undefined) data.notes = u.notes;
-      if (u.citizenship_number !== undefined)
-        data.citizenship_number = u.citizenship_number;
-      if (u.pan_number !== undefined) data.pan_number = u.pan_number;
-      if (u.nid_number !== undefined) data.nid_number = u.nid_number;
-      if (u.ssid_number !== undefined) data.ssid_number = u.ssid_number;
-
-      if (u.date_of_birth && u.date_of_birth !== "") {
-        data.date_of_birth = new Date(u.date_of_birth);
-      }
-      if (u.joining_date && u.joining_date !== "") {
-        data.joining_date = new Date(u.joining_date);
-      }
-
-      // Department / role
-      if (u.department !== undefined) data.department = u.department;
-      if (u.position !== undefined) data.position = u.position;
-      if (u.level !== undefined) data.level = u.level;
-      if (u.hierarchy !== undefined) data.hierarchy = u.hierarchy;
-      if (u.previous_experience !== undefined)
-        data.previous_experience = u.previous_experience;
-      if (u.employment_type !== undefined)
-        data.employment_type = u.employment_type;
-      if (u.employment_status !== undefined)
-        data.employment_status = u.employment_status;
-      if (u.manager_id !== undefined) data.manager_id = u.manager_id || null;
-
-      if (u.bank_name !== undefined) data.bank_name = u.bank_name;
-      if (u.account_number !== undefined)
-        data.account_number = u.account_number;
-      if (u.branch !== undefined) data.branch = u.branch;
-      if (u.contract_type !== undefined) data.contract_type = u.contract_type;
-
-      if (u.salary !== undefined && u.salary !== "") {
-        data.salary = u.salary;
-      }
-
-      if (Object.keys(data).length === 0) {
-        return res
-          .status(400)
-          .json({ success: false, message: "No valid fields to update" });
-      }
-
-      data.employee_verified = false;
-      const employee = await prisma.employee.update({
+      const existing = await prisma.employee.findUnique({
         where: { id },
-        data,
-        include: {
-          user: true,
-          manager: true,
-          emergencyContacts: true,
-          documents: true,
-          assets: true,
-        },
+        include: { personal_details: true, bank_details: true },
       });
-
-      if (u.email) {
-        await prisma.user
-          .update({
-            where: { id: employee.user_id },
-            data: { email: u.email },
-          })
-          .catch(() => {});
-      }
-
-      res.json({
-        success: true,
-        message: "Employee updated",
-        data: {
-          ...employee,
-          name: `${employee.first_name} ${employee.last_name}`.trim(),
-        },
-      });
-    } catch (error: any) {
-      if (error.code === "P2025") {
+      if (!existing) {
         return res
           .status(404)
           .json({ success: false, message: "Employee not found" });
       }
+
+      const pd = body.personal_details ?? {};
+      const bd = body.bank_details ?? {};
+      const dept = body.department ?? {};
+
+      // ── Personal details ────────────────────────────────────────────────
+      const personalUpdate: any = {};
+
+      if (body.personal_details !== undefined) {
+        if (pd.municipality !== undefined) {
+          try {
+            personalUpdate.municipality = parseMunicipality(pd.municipality);
+          } catch (e: any) {
+            return res.status(400).json({ success: false, message: e.message });
+          }
+        }
+
+        const personalFields = [
+          "first_name",
+          "last_name",
+          "email",
+          "phone",
+          "date_of_birth",
+          "gender",
+          "marital_status",
+          "citizenship_number",
+          "pan_number",
+          "nid_number",
+          "ssid_number",
+          "father_name",
+          "mother_name",
+          "grandfather_name",
+          "current_address",
+          "permanent_address",
+          "country",
+          "state",
+          "district",
+          "city",
+          "ward",
+          "tole",
+        ];
+
+        for (const field of personalFields) {
+          if (pd[field] !== undefined) {
+            if (field === "date_of_birth" && pd[field]) {
+              personalUpdate[field] = new Date(pd[field]);
+            } else if (field === "ward") {
+              personalUpdate[field] = Number(pd[field]);
+            } else {
+              personalUpdate[field] = pd[field];
+            }
+          }
+        }
+
+        const uniquePersonalFields = [
+          "citizenship_number",
+          "pan_number",
+          "nid_number",
+          "ssid_number",
+          "email",
+        ];
+        if (existing.personal_details) {
+          for (const field of uniquePersonalFields) {
+            if (
+              personalUpdate[field] !== undefined &&
+              personalUpdate[field] ===
+                (existing.personal_details as any)[field]
+            ) {
+              delete personalUpdate[field];
+            }
+          }
+        }
+
+        if (personalUpdate.email) {
+          const emailConflict = await prisma.user.findFirst({
+            where: {
+              email: personalUpdate.email,
+              NOT: { id: existing.user_id },
+            },
+          });
+          if (emailConflict) {
+            return res.status(400).json({
+              success: false,
+              message: "Email is already in use by another employee",
+            });
+          }
+        }
+        if (personalUpdate.citizenship_number) {
+          const conflict = await prisma.personalDetail.findFirst({
+            where: {
+              citizenship_number: personalUpdate.citizenship_number,
+              NOT: { employee_id: id },
+            },
+          });
+          if (conflict) {
+            return res.status(400).json({
+              success: false,
+              message: "Citizenship number already in use",
+            });
+          }
+        }
+        if (personalUpdate.pan_number) {
+          const conflict = await prisma.personalDetail.findFirst({
+            where: {
+              pan_number: personalUpdate.pan_number,
+              NOT: { employee_id: id },
+            },
+          });
+          if (conflict) {
+            return res
+              .status(400)
+              .json({ success: false, message: "PAN number already in use" });
+          }
+        }
+      }
+
+      // ── Bank details ────────────────────────────────────────────────────
+      const bankUpdate: any = {};
+      if (body.bank_details !== undefined) {
+        for (const field of [
+          "account_number",
+          "salary",
+          "bank_name",
+          "branch",
+          "contract_type",
+        ]) {
+          if (bd[field] !== undefined) {
+            bankUpdate[field] =
+              field === "salary" ? parseFloat(bd[field]) : bd[field];
+          }
+        }
+      }
+
+      // ── Department ──────────────────────────────────────────────────────
+      const deptUpdate: any = {};
+      if (body.department !== undefined) {
+        for (const field of [
+          "department_name",
+          "joining_date",
+          "hierarchy",
+          "previous_experience",
+          "employment_type",
+          "employment_status",
+          // FIX: schema field is `position`, not `designation`
+          "position",
+          "level",
+        ]) {
+          if (dept[field] !== undefined) {
+            deptUpdate[field] =
+              field === "joining_date" ? new Date(dept[field]) : dept[field];
+          }
+        }
+      }
+
+      const targetDeptId: string | undefined = dept.id;
+
+      const [employee] = await prisma.$transaction(async (tx) => {
+        if (
+          pd.first_name ||
+          pd.last_name ||
+          body.is_active !== undefined ||
+          personalUpdate.email
+        ) {
+          await tx.user.update({
+            where: { id: existing.user_id },
+            data: {
+              ...(pd.first_name || pd.last_name
+                ? {
+                    name: `${pd.first_name ?? ""} ${pd.last_name ?? ""}`.trim(),
+                  }
+                : {}),
+              ...(body.is_active !== undefined && {
+                is_active: body.is_active,
+              }),
+              ...(personalUpdate.email && { email: personalUpdate.email }),
+            },
+          });
+        }
+
+        if (Object.keys(personalUpdate).length > 0) {
+          await tx.personalDetail.upsert({
+            where: { employee_id: id },
+            update: personalUpdate,
+            create: {
+              employee_id: id,
+              first_name:
+                personalUpdate.first_name ??
+                existing.personal_details?.first_name ??
+                "",
+              last_name:
+                personalUpdate.last_name ??
+                existing.personal_details?.last_name ??
+                "",
+              email:
+                personalUpdate.email ?? existing.personal_details?.email ?? "",
+              phone:
+                personalUpdate.phone ??
+                existing.personal_details?.phone ??
+                null,
+              ...personalUpdate,
+            },
+          });
+        }
+
+        if (Object.keys(bankUpdate).length > 0) {
+          await tx.bankDetail.upsert({
+            where: { employee_id: id },
+            create: {
+              employee_id: id,
+              account_number: bankUpdate.account_number ?? "",
+              salary: bankUpdate.salary ?? 0,
+              bank_name: bankUpdate.bank_name ?? "",
+              branch: bankUpdate.branch ?? "",
+              ...bankUpdate,
+            },
+            update: bankUpdate,
+          });
+        }
+
+        if (Object.keys(deptUpdate).length > 0) {
+          let deptToUpdate: { id: string } | null = null;
+
+          if (targetDeptId) {
+            deptToUpdate = await tx.department.findFirst({
+              where: { id: targetDeptId, employee_id: id },
+              select: { id: true },
+            });
+          }
+          if (!deptToUpdate) {
+            deptToUpdate = await tx.department.findFirst({
+              where: { employee_id: id },
+              orderBy: { joining_date: "desc" },
+              select: { id: true },
+            });
+          }
+          if (deptToUpdate) {
+            await tx.department.update({
+              where: { id: deptToUpdate.id },
+              data: deptUpdate,
+            });
+          }
+        }
+
+        const needsReverification =
+          Object.keys(personalUpdate).length > 0 ||
+          Object.keys(bankUpdate).length > 0 ||
+          Object.keys(deptUpdate).length > 0;
+
+        const updatedEmployee = await tx.employee.update({
+          where: { id },
+          data: {
+            ...(body.manager_id !== undefined && {
+              manager_id: body.manager_id,
+            }),
+            ...(body.notes !== undefined && { notes: body.notes }),
+            ...(needsReverification && { employee_verified: false }),
+          },
+          include: {
+            user: true,
+            personal_details: true,
+            department: { orderBy: { joining_date: "desc" } },
+            bank_details: true,
+            emergencyContacts: true,
+            documents: true,
+            assets: true,
+            deviceMappings: {
+              include: {
+                device: {
+                  select: {
+                    serial_number: true,
+                    device_name: true,
+                    location: true,
+                    is_active: true,
+                  },
+                },
+              },
+            },
+          },
+        });
+
+        return [updatedEmployee];
+      });
+
+      res.json({ success: true, message: "Employee updated", data: employee });
+    } catch (error: any) {
+      console.error("Update employee error:", error);
       res.status(400).json({ success: false, message: error.message });
     }
   }
 
+  // ── DELETE /employees/:id ────────────────────────────────────────────────
   static async delete(req: Request, res: Response<ApiResponse>) {
     try {
       const { id } = req.params;
-
       const employee = await prisma.employee.findUnique({
         where: { id },
         select: { user_id: true },
       });
-
       if (!employee) {
         return res
           .status(404)
           .json({ success: false, message: "Employee not found" });
       }
-
       await prisma.user.delete({ where: { id: employee.user_id } });
-
       res.json({ success: true, message: "Employee deleted successfully" });
     } catch (error: any) {
       if (error.code === "P2025") {
@@ -348,41 +636,35 @@ export class EmployeeController {
       res.status(400).json({ success: false, message: error.message });
     }
   }
+
+  // ── POST /employees/:id/verify ───────────────────────────────────────────
   static async verifyEmployee(req: Request, res: Response<ApiResponse>) {
     try {
       const { id } = req.params;
-
       const employee = await prisma.employee.update({
         where: { id },
-        data: {
-          employee_verified: true,
-        },
+        data: { employee_verified: true, verification_pending: false },
       });
-
       return res.json({
         success: true,
         message: "Employee verified successfully",
         data: employee,
       });
     } catch (error: any) {
-      return res.status(400).json({
-        success: false,
-        message: error.message,
-      });
+      return res.status(400).json({ success: false, message: error.message });
     }
   }
 
-  static async uploadProfileImage(req: Request, res: Response) {
+  // ── POST /employees/:id/profile-image ────────────────────────────────────
+  static async uploadProfileImage(req: Request, res: Response<ApiResponse>) {
     try {
       const file = req.file;
       const { id } = req.params;
-
       if (!file) {
         return res
           .status(400)
           .json({ success: false, message: "No file uploaded" });
       }
-
       if (!file.mimetype.startsWith("image/")) {
         return res
           .status(400)
@@ -399,12 +681,10 @@ export class EmployeeController {
         fileName,
         file.buffer,
         file.size,
-        {
-          "Content-Type": file.mimetype,
-        },
+        { "Content-Type": file.mimetype },
       );
 
-      const updatedEmployee = await prisma.employee.update({
+      const updated = await prisma.employee.update({
         where: { id },
         data: { profile_image: fileUrl },
       });
@@ -412,7 +692,7 @@ export class EmployeeController {
       return res.json({
         success: true,
         message: "Profile image uploaded",
-        data: updatedEmployee,
+        data: updated,
       });
     } catch (error: any) {
       return res.status(500).json({ success: false, message: error.message });
@@ -423,7 +703,16 @@ export class EmployeeController {
     try {
       const { id } = req.params;
 
-      const employee = await prisma.employee.findUnique({ where: { id } });
+      const employee = await prisma.employee.findUnique({
+        where: { id },
+        include: {
+          department: {
+            orderBy: { joining_date: "desc" },
+            take: 1,
+            select: { id: true, employment_status: true },
+          },
+        },
+      });
 
       if (!employee) {
         return res.status(404).json({
@@ -432,19 +721,26 @@ export class EmployeeController {
         });
       }
 
-      if (employee.employment_status !== EmploymentStatus.active) {
+      const latestDept = employee.department[0];
+
+      if (
+        !latestDept ||
+        latestDept.employment_status !== EmploymentStatus.active
+      ) {
         return res.status(400).json({
           success: false,
           message: "Only active employees can be offboarded",
         });
       }
 
-      const updated = await prisma.employee.update({
+      const updated = await prisma.department.update({
+        where: { id: latestDept.id },
+        data: { employment_status: EmploymentStatus.notice_period },
+      });
+
+      await prisma.employee.update({
         where: { id },
-        data: {
-          employment_status: EmploymentStatus.notice_period,
-          employee_verified: false,
-        },
+        data: { employee_verified: false },
       });
 
       return res.json({

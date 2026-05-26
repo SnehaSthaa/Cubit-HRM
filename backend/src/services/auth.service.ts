@@ -5,10 +5,7 @@ import { JwtPayload, UserRole } from "../types/index.js";
 
 export class AuthService {
   static async register(email: string, password: string, name: string) {
-    const existingUser = await prisma.user.findUnique({
-      where: { email },
-    });
-
+    const existingUser = await prisma.user.findUnique({ where: { email } });
     if (existingUser) {
       throw new Error("User already exists");
     }
@@ -24,7 +21,7 @@ export class AuthService {
       },
     });
 
-    const token = this.generateToken(user);
+    const token = await this.generateToken(user);
 
     return {
       user: this.sanitizeUser(user),
@@ -42,16 +39,14 @@ export class AuthService {
     if (!user) throw new Error("Invalid credentials");
 
     const isValidPassword = await bcrypt.compare(password, user.password_hash);
-
-    console.log("PASSWORD CHECK:", isValidPassword);
-
     if (!isValidPassword) throw new Error("Invalid credentials");
-
     if (!user.is_active) throw new Error("User account is inactive");
+
+    const token = await this.generateToken(user);
 
     return {
       user: this.sanitizeUser(user),
-      token: this.generateToken(user),
+      token,
     };
   }
 
@@ -74,7 +69,6 @@ export class AuthService {
 
   static sanitizeUser(user: any) {
     const { password_hash, ...cleanUser } = user;
-
     return {
       ...cleanUser,
       phone: cleanUser.phone || null,

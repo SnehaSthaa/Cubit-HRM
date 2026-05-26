@@ -1,10 +1,21 @@
-import { Request, Response } from "express";
+import { NextFunction, Request, Response } from "express";
 import { prisma } from "../db/prisma.js";
 import { minioClient, MINIO_BASE_URL, ensureBucket } from "../utils/minio.js";
 
 const BUCKET = "employee-documents";
 
 export class EmployeeDocumentController {
+  static updateStatus(
+    arg0: string,
+    arg1: (
+      req: Request,
+      res: Response,
+      next: NextFunction,
+    ) => Response<any, Record<string, any>> | undefined,
+    updateStatus: any,
+  ) {
+    throw new Error("Method not implemented.");
+  }
   static async upload(req: Request, res: Response) {
     try {
       const { employeeId } = req.params;

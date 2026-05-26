@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { prisma } from "../db/prisma";
+import { prisma } from "../db/prisma.js";
 import { HolidayType } from "@prisma/client";
 
 export class HolidayController {

@@ -18,47 +18,67 @@ export const AttendanceAction = {
   Edit: "attendance.edit",
   Delete: "attendance.delete",
 } as const;
+
 export const LeaveManagementAction = {
   View: "leavemanagement.view",
   Create: "leavemanagement.create",
   Edit: "leavemanagement.edit",
   Delete: "leavemanagement.delete",
 } as const;
+
 export const PayrollAction = {
   View: "payroll.view",
   Create: "payroll.create",
   Edit: "payroll.edit",
   Delete: "payroll.delete",
 } as const;
+
 export const AssetsAction = {
   View: "assets.view",
   Create: "assets.create",
   Edit: "assets.edit",
   Delete: "assets.delete",
 } as const;
+
+export const BankDetailAction = {
+  View: "bankdetail.view",
+  Edit: "bankdetail.edit",
+} as const;
+
 export const OffboardingAction = {
   View: "offboarding.view",
   Create: "offboarding.create",
   Edit: "offboarding.edit",
   Delete: "offboarding.delete",
 } as const;
+
 export const ReportsAction = {
   View: "reports.view",
   Create: "reports.create",
   Edit: "reports.edit",
   Delete: "reports.delete",
 } as const;
+
 export const RolesandAccessAction = {
   View: "rolesandaccess.view",
   Create: "rolesandaccess.create",
   Edit: "rolesandaccess.edit",
   Delete: "rolesandaccess.delete",
 } as const;
+
 export const EmployeeSelfServiceAction = {
   View: "employeeselfservice.view",
   Create: "employeeselfservice.create",
   Edit: "employeeselfservice.edit",
   Delete: "employeeselfservice.delete",
+} as const;
+
+export const DeviceAction = {
+  View: "device.view",
+  Create: "device.create",
+  Update: "device.update",
+  Delete: "device.delete",
+  Sync: "device.sync",
 } as const;
 
 export type AllowedType = {
@@ -91,5 +111,8 @@ export type AllowedType = {
   };
   Employee_self_service: {
     [K in (typeof EmployeeSelfServiceAction)[keyof typeof EmployeeSelfServiceAction]]: boolean;
+  };
+  device: {
+    [K in (typeof DeviceAction)[keyof typeof DeviceAction]]: boolean;
   };
 };

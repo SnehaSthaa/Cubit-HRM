@@ -8,25 +8,23 @@ import {
   ArrowUpRight,
   Calendar as CalendarIcon,
   CakeIcon,
-  ArrowRight,
 } from "lucide-react";
 import { Calendar } from "@/components/ui/calendar";
 import { useRole } from "@/contexts/RoleContext";
 import { useToast } from "@/hooks/use-toast";
 import { apiClient } from "@/services/apiClient";
-import type { Employee } from "@/types";
+import {
+  type Employee,
+  type DepartmentRecord,
+  getLatestDepartment,
+  normalizeEmployee,
+} from "@/types";
 import { Dialog, DialogContent, DialogTitle } from "@radix-ui/react-dialog";
 import { DialogHeader } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { LeaveApiResponse, LeaveRequest } from "./LeaveManagement";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectValue,
-} from "@/components/ui/select";
-import { SelectTrigger } from "@radix-ui/react-select";
+import { type LeaveData } from "@/services/apiClient";
 import {
   Tooltip,
   TooltipContent,
@@ -34,11 +32,11 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { Protected } from "@/components/common/ProtectedRoute";
-import {
-  DashboardAction,
-  LeaveManagementAction,
-} from "@/permissions/permission";
+import { LeaveManagementAction } from "@/permissions/permission";
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Animation variants
+// ─────────────────────────────────────────────────────────────────────────────
 const container = {
   hidden: { opacity: 0 },
   show: { opacity: 1, transition: { staggerChildren: 0.06 } },
@@ -52,6 +50,10 @@ const item = {
     transition: { duration: 0.35, ease: [0.25, 0.1, 0, 1] },
   },
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Constants
+// ─────────────────────────────────────────────────────────────────────────────
 const months = [
   { label: "All", value: "all" },
   { label: "Jan", value: 0 },
@@ -68,10 +70,6 @@ const months = [
   { label: "Dec", value: 11 },
 ];
 
-type EmployeeWithBirthday = Employee & {
-  nextBirthday: Date;
-  daysLeft: number;
-};
 const leaveStatusClass: Record<string, string> = {
   "Paid Leave": "paid",
   "Sick Leave": "sick",
@@ -91,6 +89,7 @@ const enumToLeaveType: Record<string, string> = {
   paid: "Paid Leave",
   compensatory: "Compensatory Leave",
 };
+
 const normaliseStatus = (s?: string) => {
   if (!s) return "Pending";
   const map: Record<string, string> = {
@@ -103,28 +102,16 @@ const normaliseStatus = (s?: string) => {
   };
   return map[s] ?? s;
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Local types
+// ─────────────────────────────────────────────────────────────────────────────
 interface StatItem {
   label: string;
   value: number;
   icon: React.ElementType;
   change: string;
   positive: boolean;
-}
-
-interface LeaveRecord {
-  id?: string;
-  employee_id?: string;
-  employee?: { first_name: string; last_name: string; department: string };
-  leave_type?: string;
-  start_date?: string;
-  end_date?: string;
-  status?: string;
-}
-
-interface LeaveData extends LeaveRecord {
-  type?: string;
-  date?: string;
-  name?: string;
 }
 
 interface Holiday {
@@ -140,6 +127,63 @@ interface ActivityRecord {
   type: "clockin" | "leave" | "new" | "exit";
 }
 
+interface PendingAction {
+  id: string;
+  type: string;
+  description: string;
+  priority: string;
+  /** Display name derived from the employee's personal_details */
+  name: string;
+  dept: string;
+  time: string;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: safely read name / department from the normalised Employee type
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Returns "First Last" from personal_details, falling back to Employee.name */
+function getEmployeeName(emp: Employee): string {
+  const pd = emp.personal_details;
+  const full = `${pd?.first_name ?? ""} ${pd?.last_name ?? ""}`.trim();
+  return full || emp.name || emp.email || "Unknown";
+}
+
+/** Returns the current department name using the canonical helper */
+function getEmployeeDeptName(emp: Employee): string {
+  return getLatestDepartment(emp.department)?.department_name ?? "—";
+}
+
+/** Returns the date_of_birth string from personal_details */
+function getEmployeeDOB(emp: Employee): string | undefined {
+  return emp.personal_details?.date_of_birth;
+}
+
+/**
+ * Returns the employment_status string.
+ * The status lives in personal_details on the API shape but is also
+ * exposed via the latest DepartmentRecord's employment_status field.
+ * We prefer personal_details first.
+ */
+function getEmploymentStatus(emp: Employee): string {
+  return (
+    emp.personal_details?.employment_status ??
+    getLatestDepartment(emp.department)?.employment_status ??
+    "active"
+  ).toLowerCase();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Extended Employee type for the birthday list
+// ─────────────────────────────────────────────────────────────────────────────
+type EmployeeWithBirthday = Employee & {
+  nextBirthday: Date;
+  daysLeft: number;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Dashboard component
+// ─────────────────────────────────────────────────────────────────────────────
 export default function Dashboard() {
   const { isHR } = useRole();
   const { toast } = useToast();
@@ -154,6 +198,7 @@ export default function Dashboard() {
   );
   const [rejectDialog, setRejectDialog] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
+
   const [stats, setStats] = useState<StatItem[]>([
     {
       label: "Active Employees",
@@ -185,11 +230,8 @@ export default function Dashboard() {
     },
   ]);
 
-  const [todayLeaves, setTodayLeaves] = useState<LeaveRecord[]>([]);
-  const [allLeaves, setAllLeaves] = useState<LeaveRecord[]>([]);
-  const [activeEmployeesList, setActiveEmployeesList] = useState<Employee[]>(
-    [],
-  );
+  const [todayLeaves, setTodayLeaves] = useState<LeaveData[]>([]);
+  const [allLeaves, setAllLeaves] = useState<LeaveData[]>([]);
   const [currentEmployeeId, setCurrentEmployeeId] = useState<string | null>(
     null,
   );
@@ -201,32 +243,18 @@ export default function Dashboard() {
       });
     }
   }, [isHR]);
+
   const [requests, setRequests] = useState<LeaveRequest[]>([]);
-  const [pendingOffboardingList, setPendingOffboardingList] = useState<
-    Employee[]
-  >([]);
   const [upcomingHolidays, setUpcomingHolidays] = useState<Holiday[]>([]);
-  const [recentActivity, setRecentActivity] = useState<ActivityRecord[]>([
-    { text: "System initialized", time: "Today", type: "new" as const },
-  ]);
-  const [pendingActions, setPendingActions] = useState<
-    {
-      id: string;
-      type: string;
-      description: string;
-      priority: string;
-      name: string;
-      dept: string;
-      time: string;
-    }[]
-  >([]);
+  const [pendingActions, setPendingActions] = useState<PendingAction[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // ── Fetch leave requests (HR sees all; employee sees own) ──────────────────
   const fetchLeaves = async () => {
     try {
       let data: LeaveApiResponse[] = [];
 
       if (isHR) {
-        // HR fetches all leaves
         const res = await apiClient.getLeaves();
         data = Array.isArray(res.data) ? res.data : [];
       } else {
@@ -242,10 +270,12 @@ export default function Dashboard() {
                 ?.name ??
               (l.employee as { user?: { name?: string }; name?: string })?.name)
             : (l.employee ?? l.employee_name ?? "Unknown");
+
         const policyName =
           typeof l.leaveType === "object"
             ? (l.leaveType?.name ?? "Unknown Leave")
             : (l.leaveType ?? "Unknown Leave");
+
         return {
           id: l.id ?? "",
           employee: empName,
@@ -262,11 +292,14 @@ export default function Dashboard() {
             l.rejection_reason ?? l.approval_notes ?? l.rejectionReason,
         };
       });
+
       setRequests(mapped);
     } catch (err) {
       console.error("Failed to fetch leaves", err);
     }
   };
+
+  // ── Main dashboard data fetch ──────────────────────────────────────────────
   const fetchDashboardData = async () => {
     try {
       setLoading(true);
@@ -278,34 +311,39 @@ export default function Dashboard() {
       ]);
 
       const employees: Employee[] = Array.isArray(employeesRes.data)
-        ? employeesRes.data
+        ? employeesRes.data.map(normalizeEmployee)
         : [];
 
-      const allLeaves: LeaveData[] = Array.isArray(leavesRes.data)
+      // Raw leave records from backend (LeaveData shape)
+      const rawLeaves: LeaveData[] = Array.isArray(leavesRes.data)
         ? leavesRes.data
         : [];
 
-      const pendingLeaveActions = allLeaves
+      // Build pending actions from raw leave records.
+      // FIX: use personal_details.first_name / last_name, not leave.employee.*
+      const pendingLeaveActions: PendingAction[] = rawLeaves
         .filter((leave) => leave.status?.toLowerCase() === "pending")
         .map((leave) => ({
-          id: leave.id || "",
+          id: leave.id ?? "",
           type: "leave",
           description:
             enumToLeaveType[leave.leave_type ?? ""] ??
             leave.leave_type ??
             "Leave Request",
           priority: "medium",
-          name: leave.employee
-            ? `${leave.employee.first_name} ${leave.employee.last_name}`
+          // FIX: name comes from personal_details, not a flat .employee object
+          name: leave.personal_details
+            ? `${leave.personal_details.first_name} ${leave.personal_details.last_name}`.trim()
             : "Unknown",
-          dept: leave.employee?.department || "—",
-          time: leave.start_date?.split("T")[0] || "—",
+          // FIX: department name from the nested DepartmentRecord
+          dept: leave.department?.department_name ?? "—",
+          time: leave.start_date?.split("T")[0] ?? "—",
         }));
 
       const today = new Date();
       today.setHours(0, 0, 0, 0);
 
-      const todayLeavesList = allLeaves.filter((leave) => {
+      const todayLeavesList = rawLeaves.filter((leave) => {
         if (!leave.start_date || !leave.end_date) return false;
         const start = new Date(leave.start_date);
         const end = new Date(leave.end_date);
@@ -317,22 +355,24 @@ export default function Dashboard() {
       });
 
       const holidays: Holiday[] = Array.isArray(holidaysRes.data)
-        ? holidaysRes.data.map((h) => ({
-            id: h.id,
-            name: h.name || "Holiday",
-            start_date: h.start_date?.split("T")[0] ?? "",
-            end_date: h.end_date?.split("T")[0] ?? "",
-          }))
+        ? holidaysRes.data.map(
+            (h: { id?: string; name?: string; start_date?: string; end_date?: string }) => ({
+              id: h.id,
+              name: h.name ?? "Holiday",
+              start_date: h.start_date?.split("T")[0] ?? "",
+              end_date: h.end_date?.split("T")[0] ?? "",
+            }),
+          )
         : [];
 
-      const activeEmployees = employees.filter((e) => {
-        const status = (e.employment_status ?? "active").toLowerCase();
-        return status === "active";
-      });
+      // FIX: use getEmploymentStatus helper instead of emp.employment_status
+      const activeEmployees = employees.filter(
+        (e) => getEmploymentStatus(e) === "active",
+      );
 
-      const pendingOffboarding = employees.filter((e) => {
-        return (e.employment_status ?? "").toLowerCase() === "notice_period";
-      });
+      const pendingOffboarding = employees.filter(
+        (e) => getEmploymentStatus(e) === "notice_period",
+      );
 
       setStats([
         {
@@ -366,9 +406,7 @@ export default function Dashboard() {
       ]);
 
       setTodayLeaves(todayLeavesList);
-      setAllLeaves(allLeaves);
-      setActiveEmployeesList(activeEmployees);
-      setPendingOffboardingList(pendingOffboarding);
+      setAllLeaves(rawLeaves);
       setUpcomingHolidays(holidays);
       setPendingActions(pendingLeaveActions);
     } catch (err) {
@@ -377,56 +415,33 @@ export default function Dashboard() {
       setLoading(false);
     }
   };
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
 
-  const leaveDates = allLeaves
-    .filter((l) => (l.status ?? "").toLowerCase() === "approved")
-    .flatMap((l) => {
-      if (!l.start_date || !l.end_date) return [];
-
-      const start = new Date(l.start_date);
-      const end = new Date(l.end_date);
-
-      start.setHours(0, 0, 0, 0);
-      end.setHours(0, 0, 0, 0);
-
-      if (end < today) return [];
-
-      const dates: Date[] = [];
-      const temp = new Date(start < today ? today : start);
-
-      while (temp <= end) {
-        dates.push(new Date(temp));
-        temp.setDate(temp.getDate() + 1);
-      }
-
-      return dates;
-    });
-
+  // ── Birthday fetch ─────────────────────────────────────────────────────────
   const fetchBirthdays = async () => {
     try {
       const res = await apiClient.getEmployees();
-      const employees = Array.isArray(res.data) ? res.data : [];
+      const employees: Employee[] = Array.isArray(res.data)
+        ? res.data.map(normalizeEmployee)
+        : [];
 
       const today = new Date();
 
-      const upcomming = employees
+      const upcoming: EmployeeWithBirthday[] = employees
         .filter((e) => {
-          const status = (e.employment_status ?? "").toLowerCase();
+          const status = getEmploymentStatus(e);
           return ["active", "notice_period"].includes(status);
         })
-
-        .filter((e) => e.date_of_birth)
+        // FIX: DOB lives in personal_details, not top-level
+        .filter((e) => !!getEmployeeDOB(e))
         .map((e) => {
-          const dob = new Date(e.date_of_birth);
+          const dobStr = getEmployeeDOB(e)!;
+          const dob = new Date(dobStr);
 
           const nextBirthday = new Date(
             today.getFullYear(),
             dob.getMonth(),
             dob.getDate(),
           );
-
           if (nextBirthday < today) {
             nextBirthday.setFullYear(today.getFullYear() + 1);
           }
@@ -435,22 +450,24 @@ export default function Dashboard() {
             ...e,
             nextBirthday,
             daysLeft: Math.ceil(
-              (nextBirthday.getTime() - today.getTime()) /
-                (1000 * 60 * 60 * 24),
+              (nextBirthday.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
             ),
           };
         })
         .sort((a, b) => a.daysLeft - b.daysLeft);
 
-      setBirthdays(upcomming);
+      setBirthdays(upcoming);
     } catch (err) {
-      console.log(err);
+      console.error("Birthday fetch error:", err);
     }
   };
+
+  // FIX: filter by month using personal_details.date_of_birth
   const filteredBirthdays = birthdays.filter((emp) => {
     if (selectedMonth === "all") return true;
-
-    const dob = new Date(emp.date_of_birth!);
+    const dobStr = getEmployeeDOB(emp);
+    if (!dobStr) return false;
+    const dob = new Date(dobStr);
     return dob.getMonth() === Number(selectedMonth);
   });
 
@@ -461,58 +478,9 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, []);
 
-  const handleApprove = async (id: string) => {
-    if (!id) {
-      toast({
-        title: "Invalid leave ID",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    try {
-      await apiClient.approveLeave(id, "Approved from dashboard");
-
-      await fetchDashboardData();
-      console.log("DASHBOARD APPROVE DATA:", {
-        id,
-      });
-      toast({
-        title: "Leave approved successfully",
-      });
-    } catch (err) {
-      console.error("Approve error:", err);
-
-      toast({
-        title: "Approval failed",
-        description:
-          err?.message || "Something went wrong while approving leave",
-        variant: "destructive",
-      });
-    }
-  };
-
-  const handleReject = async () => {
-    if (!rejectReason.trim() || !selectedRequest) return;
-
-    try {
-      await apiClient.rejectLeave(selectedRequest.id, rejectReason);
-
-      await fetchDashboardData();
-      await fetchLeaves();
-
-      setRejectDialog(false);
-      setRejectReason("");
-      setSelectedRequest(null);
-
-      toast({ title: "Leave rejected" });
-    } catch (err) {
-      toast({
-        title: "Error",
-        description: "Failed to reject leave.",
-      });
-    }
-  };
+  // ── Calendar helpers ───────────────────────────────────────────────────────
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
 
   const toStartOfDay = (d: Date) => {
     const nd = new Date(d);
@@ -520,56 +488,108 @@ export default function Dashboard() {
     return nd;
   };
 
+  const leaveDates = allLeaves
+    .filter((l) => (l.status ?? "").toLowerCase() === "approved")
+    .flatMap((l) => {
+      if (!l.start_date || !l.end_date) return [];
+      const start = new Date(l.start_date);
+      const end = new Date(l.end_date);
+      start.setHours(0, 0, 0, 0);
+      end.setHours(0, 0, 0, 0);
+      if (end < today) return [];
+      const dates: Date[] = [];
+      const temp = new Date(start < today ? today : start);
+      while (temp <= end) {
+        dates.push(new Date(temp));
+        temp.setDate(temp.getDate() + 1);
+      }
+      return dates;
+    });
+
   const holidayDates = upcomingHolidays.flatMap((h) => {
     if (!h.start_date || !h.end_date) return [];
-
     const start = toStartOfDay(new Date(h.start_date));
     const end = toStartOfDay(new Date(h.end_date));
-
     const dates: Date[] = [];
     const temp = new Date(start);
-
     while (temp <= end) {
-      dates.push(toStartOfDay(temp));
+      dates.push(toStartOfDay(new Date(temp)));
       temp.setDate(temp.getDate() + 1);
     }
-
     return dates;
   });
+
   const getDayInfo = (date: Date) => {
     const current = toStartOfDay(date);
 
     const holiday = upcomingHolidays.find((h) => {
       if (!h.start_date || !h.end_date) return false;
-
       const start = toStartOfDay(new Date(h.start_date));
       const end = toStartOfDay(new Date(h.end_date));
-
       return current >= start && current <= end;
     });
 
+    // FIX: use personal_details for the leave employee name in tooltip
     const leave = allLeaves.find((l) => {
       if ((l.status ?? "").toLowerCase() !== "approved") return false;
       if (!l.start_date || !l.end_date) return false;
-
       const start = toStartOfDay(new Date(l.start_date));
       const end = toStartOfDay(new Date(l.end_date));
-
       return current >= start && current <= end;
     });
 
     if (holiday)
-      return <p className="text-red-700"> Holiday: {holiday.name}</p>;
+      return <p className="text-red-700">Holiday: {holiday.name}</p>;
+
     if (leave)
       return (
         <p className="text-green-700">
-          {leave.employee?.first_name} {leave.employee?.last_name} is on leave
+          {leave.personal_details
+            ? `${leave.personal_details.first_name} ${leave.personal_details.last_name}`.trim()
+            : "An employee"}{" "}
+          is on leave
         </p>
       );
 
     return null;
   };
 
+  // ── Approve / Reject handlers ──────────────────────────────────────────────
+  const handleApprove = async (id: string) => {
+    if (!id) {
+      toast({ title: "Invalid leave ID", variant: "destructive" });
+      return;
+    }
+    try {
+      await apiClient.approveLeave(id, "Approved from dashboard");
+      await fetchDashboardData();
+      toast({ title: "Leave approved successfully" });
+    } catch (err) {
+      console.error("Approve error:", err);
+      toast({
+        title: "Approval failed",
+        description: err?.message ?? "Something went wrong while approving leave",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleReject = async () => {
+    if (!rejectReason.trim() || !selectedRequest) return;
+    try {
+      await apiClient.rejectLeave(selectedRequest.id, rejectReason);
+      await fetchDashboardData();
+      await fetchLeaves();
+      setRejectDialog(false);
+      setRejectReason("");
+      setSelectedRequest(null);
+      toast({ title: "Leave rejected" });
+    } catch {
+      toast({ title: "Error", description: "Failed to reject leave." });
+    }
+  };
+
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <motion.div
       variants={container}
@@ -597,7 +617,9 @@ export default function Dashboard() {
               </div>
               {stat.change !== "—" && (
                 <span
-                  className={`flex items-center gap-0.5 text-xs font-medium font-mono-data ${stat.positive ? "text-success" : "text-warning"}`}
+                  className={`flex items-center gap-0.5 text-xs font-medium font-mono-data ${
+                    stat.positive ? "text-success" : "text-warning"
+                  }`}
                 >
                   {stat.change}
                   <ArrowUpRight className="w-3 h-3" />
@@ -612,7 +634,7 @@ export default function Dashboard() {
         ))}
       </motion.div>
 
-      {/* Today's Leave & Upcoming Holidays */}
+      {/* Today's Leave / Upcoming Holidays / Pending Actions */}
       <div className="grid grid-cols-3 gap-5">
         {/* Today's Leave */}
         <motion.div variants={item} className="glass-card overflow-hidden">
@@ -631,39 +653,46 @@ export default function Dashboard() {
                 <p className="text-sm">No employees on leave today</p>
               </div>
             ) : (
-              todayLeaves.map((l, i) => (
-                <div
-                  key={i}
-                  className="flex items-center justify-between px-3 py-2.5 rounded-lg hover:bg-accent/10 transition-colors"
-                >
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-7 h-7 rounded-md bg-primary/10 flex items-center justify-center text-[10px] font-medium text-primary shrink-0">
-                      {(l.employee?.first_name || "E")
-                        .split(" ")
-                        .map((n) => n[0])
-                        .join("")
-                        .substring(0, 2)}
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium">
-                        {l.employee
-                          ? `${l.employee.first_name || ""} ${l.employee.last_name || ""}`.trim()
-                          : "Unknown"}
-                      </p>
-                      <p className="text-[11px] text-muted-foreground">
-                        {l.employee?.department || "Department"} ·{" "}
-                        {l.start_date?.split("T")[0]} –{" "}
-                        {l.end_date?.split("T")[0]}
-                      </p>
-                    </div>
-                  </div>
-                  <span
-                    className={`status-pill ${leaveStatusClass[l.status || ""] || "status-pending"}`}
+              todayLeaves.map((l, i) => {
+                // FIX: name comes from personal_details, department from department record
+                const empName = l.personal_details
+                  ? `${l.personal_details.first_name} ${l.personal_details.last_name}`.trim()
+                  : "Unknown";
+                const deptName = l.department?.department_name ?? "Department";
+                const initials = empName
+                  .split(" ")
+                  .map((n) => n[0])
+                  .join("")
+                  .substring(0, 2)
+                  .toUpperCase();
+
+                return (
+                  <div
+                    key={l.id ?? i}
+                    className="flex items-center justify-between px-3 py-2.5 rounded-lg hover:bg-accent/10 transition-colors"
                   >
-                    {l.leave_type || "Leave"}
-                  </span>
-                </div>
-              ))
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-7 h-7 rounded-md bg-primary/10 flex items-center justify-center text-[10px] font-medium text-primary shrink-0">
+                        {initials || "E"}
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium">{empName}</p>
+                        <p className="text-[11px] text-muted-foreground">
+                          {deptName} · {l.start_date?.split("T")[0]} –{" "}
+                          {l.end_date?.split("T")[0]}
+                        </p>
+                      </div>
+                    </div>
+                    <span
+                      className={`status-pill ${
+                        leaveStatusClass[l.leave_type ?? ""] ?? "status-pending"
+                      }`}
+                    >
+                      {l.leave_type ?? "Leave"}
+                    </span>
+                  </div>
+                );
+              })
             )}
           </div>
         </motion.div>
@@ -682,11 +711,12 @@ export default function Dashboard() {
               {showCalendar ? "List View" : "Calendar View"}
             </button>
           </div>
+
           {showCalendar ? (
-            <div className="p-3 flex flex-col ">
+            <div className="p-3 flex flex-col">
               <TooltipProvider>
                 <Calendar
-                  className=" flex items-center justify-center"
+                  className="flex items-center justify-center"
                   mode="single"
                   selected={calendarDate}
                   onSelect={setCalendarDate}
@@ -709,7 +739,6 @@ export default function Dashboard() {
                   components={{
                     DayContent: ({ date }) => {
                       const info = getDayInfo(date);
-
                       return (
                         <Tooltip>
                           <TooltipTrigger asChild>
@@ -717,7 +746,6 @@ export default function Dashboard() {
                               {date.getDate()}
                             </div>
                           </TooltipTrigger>
-
                           {info && (
                             <TooltipContent side="top" className="text-xs">
                               {info}
@@ -731,20 +759,13 @@ export default function Dashboard() {
               </TooltipProvider>
               <div className="mt-3 border-t border-border pt-3">
                 <div className="space-y-2 ml-10">
-                  {/* Holiday */}
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="w-2.5 h-2.5 rounded-full bg-red-500" />
-                      <span className="text-xs font-medium">Holiday</span>
-                    </div>
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-red-500" />
+                    <span className="text-xs font-medium">Holiday</span>
                   </div>
-
-                  {/* Leave */}
-                  <div className="flex ">
-                    <div className="flex items-center gap-2">
-                      <span className="w-2.5 h-2.5 rounded-full bg-green-500" />
-                      <span className="text-xs font-medium">Leave</span>
-                    </div>
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-green-500" />
+                    <span className="text-xs font-medium">Leave</span>
                   </div>
                 </div>
               </div>
@@ -778,7 +799,7 @@ export default function Dashboard() {
                           {new Date(h.start_date).toLocaleDateString("en", {
                             day: "numeric",
                           })}
-                          {" - "}
+                          {" – "}
                           {new Date(h.end_date).toLocaleDateString("en", {
                             day: "numeric",
                           })}
@@ -804,7 +825,6 @@ export default function Dashboard() {
         </motion.div>
 
         {/* Pending Actions */}
-
         <Protected anyPermissions={[LeaveManagementAction.Edit]}>
           <motion.div variants={item} className="glass-card overflow-hidden">
             <div className="flex items-center justify-between px-5 py-4 border-b border-border">
@@ -922,8 +942,8 @@ export default function Dashboard() {
           </DialogContent>
         </Dialog>
       </div>
-      {/* Upcomming Birthdays */}
 
+      {/* Upcoming Birthdays */}
       <motion.div variants={item} className="glass-card overflow-hidden">
         <div className="px-5 pt-4 pb-3 border-b border-border space-y-3">
           <div className="flex items-center gap-2">
@@ -955,6 +975,16 @@ export default function Dashboard() {
           ) : (
             filteredBirthdays.map((emp) => {
               const isToday = emp.daysLeft === 0;
+              // FIX: read name and DOB through helpers, not top-level emp.*
+              const name = getEmployeeName(emp);
+              const dobStr = getEmployeeDOB(emp);
+              const dob = dobStr ? new Date(dobStr) : null;
+              const initials = name
+                .split(" ")
+                .map((n) => n[0])
+                .join("")
+                .substring(0, 2)
+                .toUpperCase();
 
               return (
                 <div
@@ -967,23 +997,17 @@ export default function Dashboard() {
                         <img
                           src={emp.profile_image}
                           className="w-full h-full object-cover"
+                          alt={name}
                         />
                       ) : (
-                        (
-                          `${emp.first_name || ""} ${emp.last_name || ""}`.trim() ||
-                          "E"
-                        )
-                          .split(" ")
-                          .map((n) => n[0])
-                          .join("")
+                        initials || "E"
                       )}
                     </div>
                     <div>
-                      <p className="text-sm font-medium">
-                        {emp.first_name} {emp.last_name}
-                      </p>
+                      <p className="text-sm font-medium">{name}</p>
+                      {/* FIX: department from getLatestDepartment */}
                       <p className="text-xs text-muted-foreground">
-                        {emp.department || "—"}
+                        {getEmployeeDeptName(emp)}
                       </p>
                     </div>
                   </div>
@@ -993,22 +1017,21 @@ export default function Dashboard() {
                       <span className="text-xs px-2 py-1 rounded-full bg-success/15 text-success">
                         Today 🎉
                       </span>
-                    ) : (
+                    ) : dob ? (
                       <div className="flex flex-col gap-3">
-                        {" "}
-                        <span className="flex  text-xs flex-col gap-1 items-center justify-center rounded-md h-10 w-10 font-bold text-orange-600 bg-orange-100 leading-none">
+                        <span className="flex text-xs flex-col gap-1 items-center justify-center rounded-md h-10 w-10 font-bold text-orange-600 bg-orange-100 leading-none">
                           <span>
-                            {new Date(emp.date_of_birth!)
+                            {dob
                               .toLocaleString("en-US", { month: "short" })
                               .toUpperCase()}
                           </span>
-                          <span>{new Date(emp.date_of_birth!).getDate()}</span>
+                          <span>{dob.getDate()}</span>
                         </span>
                         <span className="text-xs text-muted-foreground font-mono-data">
                           {emp.daysLeft} day{emp.daysLeft > 1 ? "s" : ""}
                         </span>
                       </div>
-                    )}
+                    ) : null}
                   </div>
                 </div>
               );
