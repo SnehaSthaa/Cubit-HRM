@@ -23,10 +23,11 @@ import { apiClient, type AssetApi } from "@/services/apiClient";
 
 // ── Regex patterns ────────────────────────────────────────────────────────────
 const nepaliPhone    = /^(\+977[-\s]?)?[9][6-9]\d{8}$/;
-const citizenshipRgx = /^\d{2}-\d{2}-\d{2}-\d{5}$/;   // e.g. 01-01-78-00123
-const panRgx         = /^[A-Z]{3}\d{7}$/;               // e.g. ABC1234567
+const citizenshipRgx = /^\d{2}-\d{2}-\d{2}-\d{5}$/;
+const panRgx         = /^[A-Z]{3}\d{7}$/;
 const nidRgx         = /^\d{16}$/;
 const nameRgx        = /^[a-zA-Z\s'.,-]+$/;
+const ssfRgx = /^\d{16}$/;
 
 function ageAtLeast(years: number) {
   return (dob: string) => {
@@ -55,7 +56,7 @@ const fuzzyEnum = (options: string[]) =>
     z.enum(options as [string, ...string[]]),
   );
 
-// ── Zod schema with specific messages for every field ────────────────────────
+// ── Zod schema ────────────────────────────────────────────────────────────────
 const updatePersonalDetailSchema = z.object({
   first_name: z
     .string()
@@ -88,19 +89,18 @@ const updatePersonalDetailSchema = z.object({
   ),
 
   date_of_birth: z.preprocess(
-  (v) => (v === "" || v === null ? undefined : v),
-  z
-    .string()
-    .refine((v) => !v || !isNaN(new Date(v).getTime()), "Date of birth is not a valid date")
-    .refine((v) => {
-      if (!v) return true;
-      // Compare date strings directly to avoid timezone issues
-      const today = new Date().toISOString().split("T")[0];
-      return v < today;
-    }, "Date of birth cannot be today or in the future")
-    .refine((v) => !v || ageAtLeast(18)(v), "You must be at least 18 years old")
-    .optional(),
-),
+    (v) => (v === "" || v === null ? undefined : v),
+    z
+      .string()
+      .refine((v) => !v || !isNaN(new Date(v).getTime()), "Date of birth is not a valid date")
+      .refine((v) => {
+        if (!v) return true;
+        const today = new Date().toISOString().split("T")[0];
+        return v < today;
+      }, "Date of birth cannot be today or in the future")
+      .refine((v) => !v || ageAtLeast(18)(v), "You must be at least 18 years old")
+      .optional(),
+  ),
 
   gender: fuzzyEnum(["Male", "Female", "Others"]).optional(),
 
@@ -123,7 +123,7 @@ const updatePersonalDetailSchema = z.object({
       .string()
       .regex(
         panRgx,
-        "PAN number must be 3 uppercase letters followed by 7 digits, no spaces (e.g. ABC1234567)",
+        "PAN number must be exactly 9 digits - no letters, spaces, or dashes",
       )
       .optional(),
   ),
@@ -132,7 +132,7 @@ const updatePersonalDetailSchema = z.object({
     (v) => (v === "" || v === null ? undefined : v),
     z
       .string()
-      .regex(nidRgx, "NID must be exactly 16 digits — no letters, spaces, or dashes")
+      .regex(nidRgx, "NID must be exactly 10 digits — no letters, spaces, or dashes")
       .optional(),
   ),
 
@@ -140,8 +140,7 @@ const updatePersonalDetailSchema = z.object({
     (v) => (v === "" || v === null ? undefined : v),
     z
       .string()
-      .min(6, "SSF SSID must be at least 6 characters")
-      .max(20, "SSF SSID must be under 20 characters")
+      .regex(ssfRgx, "SSF_SSID must be exactly 11 digits - no letters, spaces, or dashes")
       .optional(),
   ),
 
@@ -226,6 +225,36 @@ type ProfileErrors = Partial<Record<keyof ProfileFormData, string>>;
 
 const itemVariant = { hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0 } };
 const containerVariant = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.04 } } };
+
+// ── localStorage helpers ──────────────────────────────────────────────────────
+function lsKey(employeeId: string, suffix: string) {
+  return `ess_${suffix}_${employeeId}`;
+}
+
+function savePendingState(employeeId: string, sections: Set<Section>) {
+  try {
+    localStorage.setItem(lsKey(employeeId, "pending"), "true");
+    localStorage.setItem(lsKey(employeeId, "sections"), JSON.stringify([...sections]));
+  } catch { /* ignore quota errors */ }
+}
+
+function clearPendingState(employeeId: string) {
+  try {
+    localStorage.removeItem(lsKey(employeeId, "pending"));
+    localStorage.removeItem(lsKey(employeeId, "sections"));
+  } catch { /* ignore */ }
+}
+
+function loadPendingState(employeeId: string): { hasPending: boolean; sections: Set<Section> } {
+  try {
+    const hasPending = localStorage.getItem(lsKey(employeeId, "pending")) === "true";
+    const raw = localStorage.getItem(lsKey(employeeId, "sections"));
+    const sections: Set<Section> = raw ? new Set(JSON.parse(raw) as Section[]) : new Set();
+    return { hasPending, sections };
+  } catch {
+    return { hasPending: false, sections: new Set() };
+  }
+}
 
 // ── Field error component ─────────────────────────────────────────────────────
 function FieldError({ message }: { message?: string }) {
@@ -340,9 +369,13 @@ export default function EmployeeSelfService() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [leaveBalance, setLeaveBalance] = useState<LeaveBalance[]>([]);
+
+  // ── FIX: persisted pending state (survives refresh) ──────────────────────
   const [hasUnverifiedChanges, setHasUnverifiedChanges] = useState(false);
-  const [approvingAll, setApprovingAll] = useState(false);
   const [changedSections, setChangedSections] = useState<Set<Section>>(new Set());
+  // ─────────────────────────────────────────────────────────────────────────
+
+  const [approvingAll, setApprovingAll] = useState(false);
   const [statusDialog, setStatusDialog] = useState(false);
   const [empStatus, setEmpStatus] = useState("Active");
   const [editing, setEditing] = useState(false);
@@ -377,9 +410,16 @@ export default function EmployeeSelfService() {
   const pendingDocCount = documents.filter((d) => d.status === "Pending").length;
   const showApprovalBanner = isHR && (hasUnverifiedChanges || pendingDocCount > 0);
 
+  // ── FIX: markChanged now persists to localStorage ─────────────────────────
   function markChanged(section: Section) {
     setHasUnverifiedChanges(true);
-    setChangedSections((prev) => new Set(prev).add(section));
+    setChangedSections((prev) => {
+      const next = new Set(prev).add(section);
+      if (employee?.id) {
+        savePendingState(employee.id, next);
+      }
+      return next;
+    });
   }
 
   function clearError(field: keyof ProfileFormData) {
@@ -442,6 +482,15 @@ export default function EmployeeSelfService() {
         const dept = deptFromEmployee(e);
         setDeptCommitted(dept); setDeptDraft(dept);
         if (Array.isArray(e.documents) && e.documents.length) setDocuments(e.documents);
+
+        // ── FIX: restore persisted pending state after employee loads ────────
+        const { hasPending, sections } = loadPendingState(e.id);
+        if (hasPending) {
+          setHasUnverifiedChanges(true);
+          setChangedSections(sections);
+        }
+        // ────────────────────────────────────────────────────────────────────
+
       } catch (err) {
         toast({ title: "Failed to load profile", description: errMsg(err), variant: "destructive" });
       } finally {
@@ -503,7 +552,6 @@ export default function EmployeeSelfService() {
     if (!employee?.id) return;
     setProfileErrors({});
 
-    // Parse — empty strings become undefined so optional fields skip validation
     const result = updatePersonalDetailSchema.safeParse(
       Object.fromEntries(
         Object.entries(profileForm).map(([k, v]) => [k, v === "" ? undefined : v])
@@ -515,7 +563,6 @@ export default function EmployeeSelfService() {
       for (const issue of result.error.issues) {
         const field = issue.path[0] as keyof ProfileFormData;
         if (field && !errors[field]) {
-          // Messages are already specific — use them directly
           errors[field] = issue.message;
         }
       }
@@ -673,7 +720,15 @@ export default function EmployeeSelfService() {
           .filter((_, i) => results[i + 1]?.status === "fulfilled")
           .map((d) => d.id)
       );
-      if (verifyOk) { setHasUnverifiedChanges(false); setChangedSections(new Set()); }
+
+      // ── FIX: clear localStorage on successful approval ───────────────────
+      if (verifyOk) {
+        setHasUnverifiedChanges(false);
+        setChangedSections(new Set());
+        clearPendingState(employee.id);
+      }
+      // ────────────────────────────────────────────────────────────────────
+
       setDocuments((prev) =>
         prev.map((d) => approvedDocIds.has(d.id) ? { ...d, status: "Verified" as const } : d)
       );
@@ -984,7 +1039,6 @@ export default function EmployeeSelfService() {
           {/* ══ Personal ══ */}
           <TabsContent value="profile" className="space-y-4">
 
-            {/* Validation error summary banner */}
             {editing && Object.keys(profileErrors).length > 0 && (
               <motion.div
                 initial={{ opacity: 0, y: -8 }}

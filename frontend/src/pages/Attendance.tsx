@@ -672,7 +672,7 @@ export default function Attendance() {
 
   const handleAddDevice = async () => {
     if (!newDevice.name || !newDevice.ip || !newDevice.serial_number) {
-      toast({ title: "Missing fields", description: "Device name, serial number, and IP are required.", variant: "destructive" });
+      toast({ title: "Missing fields", description: "Device name, and IP are required.", variant: "destructive" });
       return;
     }
     try {
@@ -1085,15 +1085,7 @@ export default function Attendance() {
 
   const deviceConfigContent = (
     <div className="space-y-4 pt-2">
-      <div className="bg-muted/30 border border-border rounded-lg p-4">
-        <h4 className="text-sm font-semibold mb-1">ADMS Server URL</h4>
-        <p className="text-xs text-muted-foreground mb-2">
-          Set this URL on your ZKTeco device under Communication → Cloud Server.
-        </p>
-        <code className="text-xs bg-muted px-2 py-1 rounded font-mono-data">
-          {window.location.origin}/adms
-        </code>
-      </div>
+      
 
       <div>
         <div className="flex items-center justify-between mb-2">
@@ -1111,13 +1103,7 @@ export default function Attendance() {
                   <label className="text-xs text-muted-foreground mb-1 block">Device Name</label>
                   <Input value={newDevice.name} onChange={(e) => setNewDevice({ ...newDevice, name: e.target.value })} placeholder="e.g., Floor 2 Entrance" className="h-8 text-sm" />
                 </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">
-                    Serial Number <span className="text-destructive">*</span>
-                    <span className="ml-1 text-muted-foreground">(printed on back of device)</span>
-                  </label>
-                  <Input value={newDevice.serial_number} onChange={(e) => setNewDevice({ ...newDevice, serial_number: e.target.value })} placeholder="e.g., ABC1234567" className="h-8 text-sm font-mono-data" />
-                </div>
+                
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs text-muted-foreground mb-1 block">IP Address</label>
@@ -1239,7 +1225,6 @@ export default function Attendance() {
                 <DialogHeader>
                   <DialogTitle>ZKTeco Device Configuration</DialogTitle>
                   <DialogDescription>
-                    Manage ZKTeco K40 biometric devices. The device auto-registers on first punch using the serial number.
                   </DialogDescription>
                 </DialogHeader>
                 {deviceConfigContent}

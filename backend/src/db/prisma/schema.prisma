@@ -62,7 +62,7 @@ model Department {
   previous_experience String?
   employment_type     String?
   employment_status   EmploymentStatus @default(active)
-  position            String?
+  designation         String?
   level               String?
   employee            Employee         @relation(fields: [employee_id], references: [id], onDelete: Cascade)
 

@@ -53,7 +53,7 @@ async function fetchAllLogs(onProgress: (msg: string) => void): Promise<any[]> {
       const logs: any[] = result?.data ?? [];
 
       try {
-        await (zk as any).enableDevice();
+        await zk.enableDevice();
       } catch (_) {}
       await zk.disconnect();
 
