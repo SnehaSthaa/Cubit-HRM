@@ -77,7 +77,6 @@ export default function PersonalDetailForm({
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 max-w-md">
-
       {/* ── Name ── */}
       <Field label="First Name" error={errors.first_name?.message}>
         <input
@@ -107,16 +106,7 @@ export default function PersonalDetailForm({
         />
       </Field>
 
-      {/* ── SSF & SSID ── */}
-      <Field label="SSF Number" error={errors.ssf_number?.message}>
-        <input
-          type="text"
-          inputMode="numeric"
-          {...register("ssf_number")}
-          className={errors.ssf_number ? errorInputClass : inputClass}
-          placeholder="Digits only, 5–20 characters"
-        />
-      </Field>
+      {/* ── SSF_SSID ── */}
 
       <Field label="SSID Number" error={errors.ssid_number?.message}>
         <input

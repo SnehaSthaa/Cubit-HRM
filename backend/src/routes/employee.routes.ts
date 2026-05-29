@@ -32,13 +32,6 @@ router.post(
   EmployeeController.create,
 );
 
-// router.post(
-//   "/cleanup-departments",
-//   authorize("super_admin"),
-//   hasRequiredPermission([EmployeesAction.Delete]),
-//   EmployeeController.cleanupDuplicateDepartments,
-// );
-
 router.get(
   "/:id",
   authorize("super_admin", "hr_admin", "employee"),

@@ -128,8 +128,8 @@ export default function RolesAccess() {
 
       const mapped: UserAssignment[] = employees.map((e) => ({
         id: e.user?.id,
-        name: `${e.first_name} ${e.last_name}`.trim(),
-        email: e.email,
+        name: `${e.personal_details?.first_name ?? ""} ${e.personal_details?.last_name ?? ""}`.trim(),
+        email: e.personal_details?.email ?? e.user?.email ?? "",
         roles: Array.isArray(e.user?.role)
           ? e.user.role
           : [e.user?.role ?? "employee"],

@@ -1,11 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
   LogOut,
   AlertTriangle,
   CheckCircle2,
-  ArrowLeft,
   Loader2,
   User,
   Calendar,
@@ -17,8 +16,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/services/apiClient";
 import { useToast } from "@/hooks/use-toast";
-import { Protected } from "@/components/common/ProtectedRoute";
-import { OffboardingAction } from "@/permissions/permission";
 
 const item = { hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0 } };
 const container = {
@@ -40,47 +37,68 @@ interface OffboardingEmployee {
   user?: { name: string; email: string };
 }
 
-// Compute last working day — 30 days from status change
+// ─── helpers ──────────────────────────────────────────────────────────────────
+function toLocalMidnight(dateStr: string): Date {
+  const [year, month, day] = dateStr.split("T")[0].split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
 function getLastWorkingDay(updatedAt: string): string {
-  const d = new Date(updatedAt);
+  const d = toLocalMidnight(updatedAt);
   d.setDate(d.getDate() + 30);
-  return d.toISOString().split("T")[0];
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-function getNoticeDaysLeft(updatedAt: string): number {
-  const last = new Date(updatedAt);
-  last.setDate(last.getDate() + 30);
-  const today = new Date();
-  return Math.max(0, Math.ceil((last.getTime() - today.getTime()) / 86400000));
+function getNoticeDaysLeft(updatedAt: string, now: Date): number {
+  const startMidnight = toLocalMidnight(updatedAt);
+  const lastDay = new Date(startMidnight);
+  lastDay.setDate(lastDay.getDate() + 30);
+
+  const todayMidnight = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+  );
+
+  return Math.max(
+    0,
+    Math.round((lastDay.getTime() - todayMidnight.getTime()) / 86_400_000),
+  );
+}
+
+function getNoticeProgress(updatedAt: string, now: Date): number {
+  const daysLeft = getNoticeDaysLeft(updatedAt, now);
+  return Math.min(100, Math.round(((30 - daysLeft) / 30) * 100));
 }
 
 export default function Offboarding() {
   const { id } = useParams<{ id?: string }>();
-  const navigate = useNavigate();
   const { toast } = useToast();
 
   const [employees, setEmployees] = useState<OffboardingEmployee[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(id ?? null);
   const [completing, setCompleting] = useState<string | null>(null);
-  const [sortOrder, setSortOrder] = useState<"asc" | "desc" | "null">("null");
 
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc" | null>(null);
+
+  const [now, setNow] = useState(() => new Date());
   useEffect(() => {
-    fetchOffboarding();
+    const id = setInterval(() => setNow(new Date()), 60_000);
+    return () => clearInterval(id);
   }, []);
 
   useEffect(() => {
     if (id) setSelectedId(id);
   }, [id]);
 
-  const fetchOffboarding = async () => {
+  const fetchOffboarding = useCallback(async () => {
     try {
       setLoading(true);
       const res = await apiClient.getOffboardingEmployees();
       setEmployees(
         Array.isArray(res.data) ? (res.data as OffboardingEmployee[]) : [],
       );
-    } catch (err) {
+    } catch {
       toast({
         title: "Failed to load offboarding data",
         variant: "destructive",
@@ -88,7 +106,11 @@ export default function Offboarding() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [toast]);
+
+  useEffect(() => {
+    fetchOffboarding();
+  }, [fetchOffboarding]);
 
   const handleCompleteOffboarding = async (empId: string) => {
     try {
@@ -103,10 +125,10 @@ export default function Offboarding() {
         title: "Offboarding completed",
         description: "Employee marked as resigned.",
       });
-    } catch (err) {
+    } catch (err: unknown) {
       toast({
         title: "Failed to complete offboarding",
-        description: err.message,
+        description: err instanceof Error ? err.message : "Unknown error",
         variant: "destructive",
       });
     } finally {
@@ -114,14 +136,24 @@ export default function Offboarding() {
     }
   };
 
+  // FIX 3 – toggle cycles asc → desc → null (actual null, not string)
+  const toggleSort = () =>
+    setSortOrder((prev) =>
+      prev === "asc" ? "desc" : prev === "desc" ? null : "asc",
+    );
+
   const selected = employees.find((e) => e.id === selectedId);
+
   const resignedEmployees = employees
     .filter((e) => e.employment_status === "resigned")
     .sort((a, b) => {
+      if (!sortOrder) return 0; // FIX 4 – no sort when null (was comparing to string "null")
       const dateA = new Date(getLastWorkingDay(a.updated_at)).getTime();
       const dateB = new Date(getLastWorkingDay(b.updated_at)).getTime();
       return sortOrder === "desc" ? dateB - dateA : dateA - dateB;
     });
+
+  // ─── loading ────────────────────────────────────────────────────────────────
 
   if (loading) {
     return (
@@ -132,6 +164,8 @@ export default function Offboarding() {
     );
   }
 
+  // ─── render ─────────────────────────────────────────────────────────────────
+
   return (
     <motion.div
       variants={container}
@@ -139,6 +173,7 @@ export default function Offboarding() {
       animate="show"
       className="space-y-4"
     >
+      {/* Header */}
       <motion.div variants={item} className="flex items-center justify-between">
         <div>
           <h1 className="text-lg font-semibold">Exit / Offboarding</h1>
@@ -163,6 +198,7 @@ export default function Offboarding() {
         </div>
       </motion.div>
 
+      {/* Empty state */}
       {employees.length === 0 ? (
         <motion.div
           variants={item}
@@ -180,11 +216,15 @@ export default function Offboarding() {
         </motion.div>
       ) : (
         <div className="grid grid-cols-3 gap-4">
+          {/* ── List ── */}
           <div className="col-span-1 space-y-2">
             {employees.map((emp) => {
-              const daysLeft = getNoticeDaysLeft(emp.updated_at);
+              // FIX 5 – pass `now` so the displayed value is always fresh
+              const daysLeft = getNoticeDaysLeft(emp.updated_at, now);
+              const progress = getNoticeProgress(emp.updated_at, now);
               const isSelected = selectedId === emp.id;
               const isNotice = emp.employment_status === "notice_period";
+
               return (
                 <motion.div
                   key={emp.id}
@@ -216,7 +256,6 @@ export default function Offboarding() {
                         {emp.first_name} {emp.last_name}
                         <span className="text-xs"> ({emp.employee_id})</span>
                       </p>
-
                       <p className="text-xs text-muted-foreground truncate">
                         {emp.department}
                       </p>
@@ -227,6 +266,7 @@ export default function Offboarding() {
                       {isNotice ? "Notice" : "Resigned"}
                     </span>
                   </div>
+
                   {isNotice && (
                     <div className="mt-2.5 pt-2.5 border-t border-border/60">
                       <div className="flex items-center justify-between text-[11px] text-muted-foreground mb-1.5">
@@ -234,16 +274,12 @@ export default function Offboarding() {
                           <Clock className="w-3 h-3" />
                           {daysLeft} day{daysLeft !== 1 ? "s" : ""} left
                         </span>
-                        <span>
-                          {Math.round(((30 - daysLeft) / 30) * 100)}% complete
-                        </span>
+                        <span>{progress}% complete</span>
                       </div>
                       <div className="h-1 bg-muted rounded-full overflow-hidden">
                         <div
                           className="h-full bg-amber-400 rounded-full transition-all"
-                          style={{
-                            width: `${Math.round(((30 - daysLeft) / 30) * 100)}%`,
-                          }}
+                          style={{ width: `${progress}%` }}
                         />
                       </div>
                     </div>
@@ -253,7 +289,7 @@ export default function Offboarding() {
             })}
           </div>
 
-          {/* Detail */}
+          {/* ── Detail ── */}
           <div className="col-span-2">
             {selected ? (
               <motion.div
@@ -300,6 +336,7 @@ export default function Offboarding() {
                       </span>
                     </div>
                   </div>
+
                   {selected.employment_status === "notice_period" && (
                     <Button
                       size="sm"
@@ -325,7 +362,7 @@ export default function Offboarding() {
                       <p className="text-[11px] text-muted-foreground mb-1 uppercase tracking-wide font-medium">
                         Status Changed
                       </p>
-                      <p className="text-sm font-mono-data font-medium">
+                      <p className="text-sm font-mono font-medium">
                         {selected.updated_at.split("T")[0]}
                       </p>
                     </div>
@@ -333,7 +370,7 @@ export default function Offboarding() {
                       <p className="text-[11px] text-muted-foreground mb-1 uppercase tracking-wide font-medium">
                         Last Working Day
                       </p>
-                      <p className="text-sm font-mono-data font-medium">
+                      <p className="text-sm font-mono font-medium">
                         {getLastWorkingDay(selected.updated_at)}
                       </p>
                     </div>
@@ -355,7 +392,7 @@ export default function Offboarding() {
                         }`}
                       >
                         {selected.employment_status === "notice_period"
-                          ? `${getNoticeDaysLeft(selected.updated_at)} days left`
+                          ? `${getNoticeDaysLeft(selected.updated_at, now)} days left`
                           : "Completed"}
                       </p>
                     </div>
@@ -367,19 +404,14 @@ export default function Offboarding() {
                       <div className="flex items-center justify-between text-xs text-muted-foreground mb-2">
                         <span>Notice period progress</span>
                         <span>
-                          {Math.round(
-                            ((30 - getNoticeDaysLeft(selected.updated_at)) /
-                              30) *
-                              100,
-                          )}
-                          %
+                          {getNoticeProgress(selected.updated_at, now)}%
                         </span>
                       </div>
                       <div className="h-2 bg-muted rounded-full overflow-hidden">
                         <div
                           className="h-full bg-amber-400 rounded-full transition-all duration-500"
                           style={{
-                            width: `${Math.round(((30 - getNoticeDaysLeft(selected.updated_at)) / 30) * 100)}%`,
+                            width: `${getNoticeProgress(selected.updated_at, now)}%`,
                           }}
                         />
                       </div>
@@ -408,11 +440,11 @@ export default function Offboarding() {
                           label: "HR Documents",
                           desc: "Exit interview, NOC",
                         },
-                      ].map((item) => {
+                      ].map((checkItem) => {
                         const done = selected.employment_status === "resigned";
                         return (
                           <div
-                            key={item.key}
+                            key={checkItem.key}
                             className={`p-3 rounded-lg border transition-colors ${
                               done
                                 ? "border-success/30 bg-success/5"
@@ -426,11 +458,11 @@ export default function Offboarding() {
                                 <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
                               )}
                               <span className="text-xs font-medium">
-                                {item.label}
+                                {checkItem.label}
                               </span>
                             </div>
                             <p className="text-[11px] text-muted-foreground">
-                              {item.desc}
+                              {checkItem.desc}
                             </p>
                           </div>
                         );
@@ -454,7 +486,8 @@ export default function Offboarding() {
           </div>
         </div>
       )}
-      {/* Resigned Employees Table */}
+
+      {/* Resigned employees table */}
       {resignedEmployees.length > 0 && (
         <motion.div
           variants={item}
@@ -467,7 +500,6 @@ export default function Offboarding() {
                 Employees who completed offboarding
               </p>
             </div>
-
             <div className="text-xs text-muted-foreground">
               {resignedEmployees.length} employee
               {resignedEmployees.length !== 1 ? "s" : ""}
@@ -481,29 +513,18 @@ export default function Offboarding() {
                   <th className="text-left px-4 py-3 font-medium text-muted-foreground">
                     Employee
                   </th>
-
                   <th className="text-left px-4 py-3 font-medium text-muted-foreground">
                     Department
                   </th>
-
                   <th className="text-left px-4 py-3 font-medium text-muted-foreground">
                     Position
                   </th>
-
                   <th className="text-left px-4 py-3 font-medium text-muted-foreground">
+                    {/* FIX 6 – toggle now correctly cycles asc → desc → null */}
                     <button
                       className="flex items-center gap-1 font-medium hover:text-foreground transition-colors"
-                      onClick={() => {
-                        setSortOrder((prev) =>
-                          prev === "asc"
-                            ? "desc"
-                            : prev === "desc"
-                              ? null
-                              : "asc",
-                        );
-                      }}
+                      onClick={toggleSort}
                     >
-                      {" "}
                       Last Working Day
                       {sortOrder === "asc" ? (
                         <ArrowUp className="w-3 h-3 text-primary" />
@@ -514,7 +535,6 @@ export default function Offboarding() {
                       )}
                     </button>
                   </th>
-
                   <th className="text-left px-4 py-3 font-medium text-muted-foreground">
                     Status
                   </th>
@@ -543,35 +563,28 @@ export default function Offboarding() {
                             </span>
                           )}
                         </div>
-
                         <div>
                           <p className="font-medium text-sm">
                             {emp.first_name} {emp.last_name}
                           </p>
-
                           <p className="text-xs text-muted-foreground">
                             {emp.employee_id}
                           </p>
                         </div>
                       </div>
                     </td>
-
                     <td className="px-4 py-3 text-muted-foreground">
                       {emp.department}
                     </td>
-
                     <td className="px-4 py-3 text-muted-foreground">
                       {emp.position}
                     </td>
-
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1.5 text-muted-foreground">
                         <Calendar className="w-3.5 h-3.5" />
-
                         {getLastWorkingDay(emp.updated_at)}
                       </div>
                     </td>
-
                     <td className="px-4 py-3">
                       <span className="status-pill resigned">Resigned</span>
                     </td>

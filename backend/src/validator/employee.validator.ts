@@ -124,7 +124,7 @@ export const createDepartmentSchema = z.object({
   previous_experience: z.string().optional(),
   employment_type: z.string().optional(),
   employment_status: z.string().optional(),
-  designation: z.string().optional(),
+  position: z.string().optional(),
   level: z.string().optional(),
 });
 
@@ -156,7 +156,7 @@ export const createEmployeeSchema = z.object({
   manager_id: uuidString.optional(),
   notes: z.string().optional(),
   phone: z.string().nullable().optional(),
-  date_of_birth: adultDobString.optional(), // ← was pastDateString
+  date_of_birth: adultDobString.optional(),
   gender: GenderEnum.optional(),
   marital_status: MaritalStatusEnum.optional(),
   citizenship_number: z.string().optional(),
@@ -179,7 +179,7 @@ export const createEmployeeSchema = z.object({
   previous_experience: z.string().optional(),
   employment_type: z.string().optional(),
   employment_status: z.string().optional(),
-  designation: z.string().optional(),
+  position: z.string().optional(),
   level: z.string().optional(),
   salary: decimalNumber.optional(),
   account_number: z.string().optional(),

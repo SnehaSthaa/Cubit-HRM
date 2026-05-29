@@ -32,16 +32,13 @@ export class PersonalDetailController {
     try {
       const { employeeId } = req.params;
 
-      // 1. Validate the body
       const validatedData = updatePersonalDetailSchema.parse(req.body);
 
-      // 2. Destructure and Normalize
       const { date_of_birth, ...rest } = validatedData;
       const normalizedDate = date_of_birth
         ? new Date(date_of_birth)
         : undefined;
 
-      // 3. Database Operation
       const [personal] = await prisma.$transaction([
         prisma.personalDetail.upsert({
           where: { employee_id: employeeId },
@@ -50,13 +47,11 @@ export class PersonalDetailController {
             ...(normalizedDate && { date_of_birth: normalizedDate }),
           },
           create: {
-            // Provide explicit fallbacks for required Prisma fields
             employee_id: employeeId,
             first_name: rest.first_name || "",
             last_name: rest.last_name || "",
             email: rest.email || "",
             phone: rest.phone || "",
-            // Spread the rest of the optional fields
             ...rest,
             ...(normalizedDate && { date_of_birth: normalizedDate }),
           },
@@ -73,7 +68,6 @@ export class PersonalDetailController {
         data: personal,
       });
     } catch (error: any) {
-      // Handle Zod Validation Errors
       if (error instanceof ZodError) {
         return res.status(400).json({
           success: false,

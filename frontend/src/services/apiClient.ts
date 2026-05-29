@@ -10,6 +10,7 @@ import {
   PersonalDetail,
   DepartmentRecord,
   BankDetail,
+  OffboardingEmployee,
 } from "@/types/index";
 import axios, { AxiosInstance } from "axios";
 
@@ -107,9 +108,16 @@ export interface AssetApi {
   updated_at?: string;
   employee?: {
     id: string;
-    first_name: string;
-    last_name: string;
-    department: string;
+
+    personal_details?: {
+      first_name?: string;
+      last_name?: string;
+    } | null;
+
+    department?: {
+      department_name: string;
+      joining_date?: string;
+    }[];
   } | null;
   reviewer?: {
     id: string;
@@ -670,8 +678,8 @@ class ApiClient {
   // ── OFFBOARDING ───────────────────────────────────────────────────────────
 
   getOffboardingEmployees() {
-    return this.parse<EmployeeAPI[]>(
-      this.client.get<ApiResponse<EmployeeAPI[]>>("/offboarding"),
+    return this.parse<OffboardingEmployee[]>(
+      this.client.get<ApiResponse<OffboardingEmployee[]>>("/offboarding"),
     );
   }
 

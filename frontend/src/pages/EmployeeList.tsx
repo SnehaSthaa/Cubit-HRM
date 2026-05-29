@@ -88,11 +88,6 @@ const statusClass: Record<string, string> = {
   resigned: "resigned",
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Helpers — read nested fields from the normalised Employee type
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** employment_status from personal_details, falling back to latest dept record */
 function getEmploymentStatus(emp: Employee): string {
   return (
     emp.personal_details?.employment_status ??
@@ -106,12 +101,10 @@ function getDeptName(emp: Employee): string {
   return getLatestDepartment(emp.department)?.department_name ?? "—";
 }
 
-/** designation / position from the most-recent DepartmentRecord */
 function getDesignation(emp: Employee): string {
-  return getLatestDepartment(emp.department)?.designation ?? "—";
+  return getLatestDepartment(emp.department)?.position ?? "—";
 }
 
-/** joining_date from personal_details, falling back to latest dept record */
 function getJoiningDate(emp: Employee): string {
   return (
     emp.personal_details?.joining_date ??
@@ -173,15 +166,25 @@ export default function EmployeeList() {
           ? response.data
           : [];
 
-        // FIX: use normalizeEmployee (from @/types) so Employee always has
-        // name, email, and properly nested personal_details / department[].
-        // Then filter by employment_status via the helper.
         const normalised: Employee[] = raw
           .map(normalizeEmployee)
           .filter((emp) => {
+            const roles = emp.user?.role ?? [];
+            const roleList = Array.isArray(roles) ? roles : [roles];
+            const hasEmployeeRole = roleList.some(
+              (r: string) => r?.toLowerCase() === "employee",
+            );
+            if (!hasEmployeeRole) return false;
+
+            // Existing status filter
             const status = getEmploymentStatus(emp);
             return status === "active" || status === "notice_period";
           });
+        // Add right after setEmployees(normalised) in fetchEmployees:
+        console.log(
+          "FIRST EMP DEPT:",
+          JSON.stringify(normalised[0]?.department, null, 2),
+        );
 
         setEmployees(normalised);
       } catch (error) {
@@ -266,6 +269,7 @@ export default function EmployeeList() {
         employee_id: data.employee_id,
         phone: data.phone,
         date_of_birth: data.date_of_birth,
+        position: data.position,
         employment_type: data.employment_type,
       });
 
@@ -623,7 +627,11 @@ export default function EmployeeList() {
                     onClick={() => {
                       setSortEmployeeName(null);
                       setSortEmployeeId((prev) =>
-                        prev === "asc" ? "desc" : prev === "desc" ? null : "asc",
+                        prev === "asc"
+                          ? "desc"
+                          : prev === "desc"
+                            ? null
+                            : "asc",
                       );
                     }}
                   >
@@ -644,7 +652,11 @@ export default function EmployeeList() {
                     onClick={() => {
                       setSortEmployeeId(null);
                       setSortEmployeeName((prev) =>
-                        prev === "asc" ? "desc" : prev === "desc" ? null : "asc",
+                        prev === "asc"
+                          ? "desc"
+                          : prev === "desc"
+                            ? null
+                            : "asc",
                       );
                     }}
                   >
@@ -661,7 +673,7 @@ export default function EmployeeList() {
                 <th>Department</th>
                 <th>Position</th>
                 <th>Email</th>
-                {/* FIX: column was rendering emp.phone but labelled "Joined" */}
+
                 <th>Joined</th>
                 <th>Status</th>
                 <th className="w-10"></th>
@@ -670,7 +682,7 @@ export default function EmployeeList() {
             <tbody>
               {filtered.map((emp) => {
                 const dept = getDeptName(emp);
-                const designation = getDesignation(emp);
+                const position = getDesignation(emp);
                 const joiningDate = getJoiningDate(emp);
                 const status = getEmploymentStatus(emp);
                 const initials = emp.name
@@ -706,7 +718,7 @@ export default function EmployeeList() {
                     {/* FIX: all cells now use helpers instead of non-existent flat fields */}
                     <td className="text-sm">{dept}</td>
                     <td className="text-sm text-muted-foreground">
-                      {designation}
+                      {position}
                     </td>
                     <td className="text-sm text-muted-foreground">
                       {emp.email}

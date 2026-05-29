@@ -110,11 +110,12 @@ export const createPersonalDetailSchema = z.object({
   citizenship_number: z.string().optional(),
   pan_number: z.string().optional(),
   nid_number: z.string().optional(),
-  ssid_number: socialIdNumber, // ← validated
-  ssf_number: socialIdNumber, // ← NEW
+  ssid_number: socialIdNumber,
+  ssf_number: socialIdNumber,
   father_name: z.string().optional(),
   mother_name: z.string().optional(),
   grandfather_name: z.string().optional(),
+  spouse_name: z.string().optional(),
   current_address: z.string().optional(),
   permanent_address: z.string().optional(),
   country: z.string().optional(),
@@ -172,8 +173,8 @@ export const createEmployeeSchema = z.object({
   citizenship_number: z.string().optional(),
   pan_number: z.string().optional(),
   nid_number: z.string().optional(),
-  ssid_number: socialIdNumber, // ← validated
-  ssf_number: socialIdNumber, // ← NEW
+  ssid_number: socialIdNumber,
+  ssf_number: socialIdNumber,
   father_name: z.string().optional(),
   mother_name: z.string().optional(),
   grandfather_name: z.string().optional(),

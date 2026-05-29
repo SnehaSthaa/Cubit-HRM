@@ -254,14 +254,14 @@ export class UserController {
     try {
       if (!req.user) {
         return res.status(401).json({
-          success: "false",
+          success: false,
           message: "Unauthorized",
         });
       }
       const { userId, role } = req.body;
       if (!userId || !role) {
         return res.status(400).json({
-          success: "false",
+          success: false,
           message: "userId and role are required",
         });
       }
@@ -271,7 +271,7 @@ export class UserController {
       });
       if (!user) {
         return res.status(404).json({
-          success: "false",
+          success: false,
           message: "User not found",
         });
       }

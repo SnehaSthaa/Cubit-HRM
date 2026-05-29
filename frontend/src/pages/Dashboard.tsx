@@ -24,7 +24,6 @@ import { DialogHeader } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { LeaveApiResponse, LeaveRequest } from "./LeaveManagement";
-import { type LeaveData } from "@/services/apiClient";
 import {
   Tooltip,
   TooltipContent,
@@ -79,17 +78,6 @@ const leaveStatusClass: Record<string, string> = {
   Maternity: "status-active",
 };
 
-const enumToLeaveType: Record<string, string> = {
-  sick: "Sick Leave",
-  personal: "Personal Leave",
-  vacation: "Vacation",
-  maternity: "Maternity Leave",
-  casual: "Casual Leave",
-  unpaid: "Unpaid Leave",
-  paid: "Paid Leave",
-  compensatory: "Compensatory Leave",
-};
-
 const normaliseStatus = (s?: string) => {
   if (!s) return "Pending";
   const map: Record<string, string> = {
@@ -102,6 +90,61 @@ const normaliseStatus = (s?: string) => {
   };
   return map[s] ?? s;
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The actual shape returned by GET /leaves (backend getAll).
+// employee is a nested object with user, personal_details, and department[].
+// ─────────────────────────────────────────────────────────────────────────────
+interface LeaveRecord {
+  id: string;
+  employee_id: string;
+  start_date: string;
+  end_date: string;
+  days_count: number;
+  status: string;
+  reason?: string;
+  created_at: string;
+  approved_by?: string;
+  approval_notes?: string;
+  employee: {
+    id: string;
+    user: {
+      name: string;
+      email: string;
+    };
+    personal_details?: {
+      first_name?: string;
+      last_name?: string;
+    } | null;
+    department: Array<{
+      department_name: string;
+      joining_date: string;
+    }>;
+  };
+  leaveType: {
+    id: string;
+    name: string;
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: extract display name from a LeaveRecord
+// Prefers personal_details first/last name, falls back to user.name
+// ─────────────────────────────────────────────────────────────────────────────
+function getLeaveEmployeeName(leave: LeaveRecord): string {
+  const pd = leave.employee?.personal_details;
+  if (pd?.first_name || pd?.last_name) {
+    return `${pd.first_name ?? ""} ${pd.last_name ?? ""}`.trim();
+  }
+  return leave.employee?.user?.name ?? "Unknown";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: extract department name from a LeaveRecord (most recent department)
+// ─────────────────────────────────────────────────────────────────────────────
+function getLeaveDepartment(leave: LeaveRecord): string {
+  return leave.employee?.department?.[0]?.department_name ?? "—";
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Local types
@@ -121,50 +164,33 @@ interface Holiday {
   name: string;
 }
 
-interface ActivityRecord {
-  text: string;
-  time: string;
-  type: "clockin" | "leave" | "new" | "exit";
-}
-
 interface PendingAction {
   id: string;
   type: string;
   description: string;
   priority: string;
-  /** Display name derived from the employee's personal_details */
   name: string;
   dept: string;
   time: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Helper: safely read name / department from the normalised Employee type
+// Employee-level helpers (unchanged from original)
 // ─────────────────────────────────────────────────────────────────────────────
-
-/** Returns "First Last" from personal_details, falling back to Employee.name */
 function getEmployeeName(emp: Employee): string {
   const pd = emp.personal_details;
   const full = `${pd?.first_name ?? ""} ${pd?.last_name ?? ""}`.trim();
   return full || emp.name || emp.email || "Unknown";
 }
 
-/** Returns the current department name using the canonical helper */
 function getEmployeeDeptName(emp: Employee): string {
   return getLatestDepartment(emp.department)?.department_name ?? "—";
 }
 
-/** Returns the date_of_birth string from personal_details */
 function getEmployeeDOB(emp: Employee): string | undefined {
   return emp.personal_details?.date_of_birth;
 }
 
-/**
- * Returns the employment_status string.
- * The status lives in personal_details on the API shape but is also
- * exposed via the latest DepartmentRecord's employment_status field.
- * We prefer personal_details first.
- */
 function getEmploymentStatus(emp: Employee): string {
   return (
     emp.personal_details?.employment_status ??
@@ -173,9 +199,6 @@ function getEmploymentStatus(emp: Employee): string {
   ).toLowerCase();
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Extended Employee type for the birthday list
-// ─────────────────────────────────────────────────────────────────────────────
 type EmployeeWithBirthday = Employee & {
   nextBirthday: Date;
   daysLeft: number;
@@ -230,11 +253,15 @@ export default function Dashboard() {
     },
   ]);
 
-  const [todayLeaves, setTodayLeaves] = useState<LeaveData[]>([]);
-  const [allLeaves, setAllLeaves] = useState<LeaveData[]>([]);
+  const [todayLeaves, setTodayLeaves] = useState<LeaveRecord[]>([]);
+  const [allLeaves, setAllLeaves] = useState<LeaveRecord[]>([]);
   const [currentEmployeeId, setCurrentEmployeeId] = useState<string | null>(
     null,
   );
+  const [requests, setRequests] = useState<LeaveRequest[]>([]);
+  const [upcomingHolidays, setUpcomingHolidays] = useState<Holiday[]>([]);
+  const [pendingActions, setPendingActions] = useState<PendingAction[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!isHR) {
@@ -244,16 +271,10 @@ export default function Dashboard() {
     }
   }, [isHR]);
 
-  const [requests, setRequests] = useState<LeaveRequest[]>([]);
-  const [upcomingHolidays, setUpcomingHolidays] = useState<Holiday[]>([]);
-  const [pendingActions, setPendingActions] = useState<PendingAction[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  // ── Fetch leave requests (HR sees all; employee sees own) ──────────────────
+  // ── Fetch leave requests for the mapped LeaveRequest type ─────────────────
   const fetchLeaves = async () => {
     try {
       let data: LeaveApiResponse[] = [];
-
       if (isHR) {
         const res = await apiClient.getLeaves();
         data = Array.isArray(res.data) ? res.data : [];
@@ -266,11 +287,8 @@ export default function Dashboard() {
       const mapped: LeaveRequest[] = data.map((l: LeaveApiResponse) => {
         const empName =
           typeof l.employee === "object"
-            ? ((l.employee as { user?: { name?: string }; name?: string })?.user
-                ?.name ??
-              (l.employee as { user?: { name?: string }; name?: string })?.name)
+            ? (l.employee?.user?.name ?? l.employee?.name)
             : (l.employee ?? l.employee_name ?? "Unknown");
-
         const policyName =
           typeof l.leaveType === "object"
             ? (l.leaveType?.name ?? "Unknown Leave")
@@ -314,31 +332,9 @@ export default function Dashboard() {
         ? employeesRes.data.map(normalizeEmployee)
         : [];
 
-      // Raw leave records from backend (LeaveData shape)
-      const rawLeaves: LeaveData[] = Array.isArray(leavesRes.data)
-        ? leavesRes.data
+      const rawLeaves: LeaveRecord[] = Array.isArray(leavesRes.data)
+        ? (leavesRes.data as LeaveRecord[])
         : [];
-
-      // Build pending actions from raw leave records.
-      // FIX: use personal_details.first_name / last_name, not leave.employee.*
-      const pendingLeaveActions: PendingAction[] = rawLeaves
-        .filter((leave) => leave.status?.toLowerCase() === "pending")
-        .map((leave) => ({
-          id: leave.id ?? "",
-          type: "leave",
-          description:
-            enumToLeaveType[leave.leave_type ?? ""] ??
-            leave.leave_type ??
-            "Leave Request",
-          priority: "medium",
-          // FIX: name comes from personal_details, not a flat .employee object
-          name: leave.personal_details
-            ? `${leave.personal_details.first_name} ${leave.personal_details.last_name}`.trim()
-            : "Unknown",
-          // FIX: department name from the nested DepartmentRecord
-          dept: leave.department?.department_name ?? "—",
-          time: leave.start_date?.split("T")[0] ?? "—",
-        }));
 
       const today = new Date();
       today.setHours(0, 0, 0, 0);
@@ -349,27 +345,37 @@ export default function Dashboard() {
         const end = new Date(leave.end_date);
         start.setHours(0, 0, 0, 0);
         end.setHours(0, 0, 0, 0);
-        const approved =
-          !leave.status || leave.status.toLowerCase() === "approved";
-        return start <= today && today <= end && approved;
+        return (
+          start <= today &&
+          today <= end &&
+          leave.status?.toLowerCase() === "approved"
+        );
       });
 
+      const pendingLeaveActions: PendingAction[] = rawLeaves
+        .filter((leave) => leave.status?.toLowerCase() === "pending")
+        .map((leave) => ({
+          id: leave.id,
+          type: "leave",
+          description: leave.leaveType?.name ?? "Leave Request",
+          priority: "medium",
+          name: getLeaveEmployeeName(leave),
+          dept: getLeaveDepartment(leave),
+          time: leave.start_date?.split("T")[0] ?? "—",
+        }));
+
       const holidays: Holiday[] = Array.isArray(holidaysRes.data)
-        ? holidaysRes.data.map(
-            (h: { id?: string; name?: string; start_date?: string; end_date?: string }) => ({
-              id: h.id,
-              name: h.name ?? "Holiday",
-              start_date: h.start_date?.split("T")[0] ?? "",
-              end_date: h.end_date?.split("T")[0] ?? "",
-            }),
-          )
+        ? holidaysRes.data.map((h) => ({
+            id: h.id,
+            name: h.name ?? "Holiday",
+            start_date: h.start_date?.split("T")[0] ?? "",
+            end_date: h.end_date?.split("T")[0] ?? "",
+          }))
         : [];
 
-      // FIX: use getEmploymentStatus helper instead of emp.employment_status
       const activeEmployees = employees.filter(
         (e) => getEmploymentStatus(e) === "active",
       );
-
       const pendingOffboarding = employees.filter(
         (e) => getEmploymentStatus(e) === "notice_period",
       );
@@ -425,34 +431,37 @@ export default function Dashboard() {
         : [];
 
       const today = new Date();
+      today.setHours(0, 0, 0, 0);
 
       const upcoming: EmployeeWithBirthday[] = employees
         .filter((e) => {
           const status = getEmploymentStatus(e);
           return ["active", "notice_period"].includes(status);
         })
-        // FIX: DOB lives in personal_details, not top-level
         .filter((e) => !!getEmployeeDOB(e))
         .map((e) => {
           const dobStr = getEmployeeDOB(e)!;
           const dob = new Date(dobStr);
 
-          const nextBirthday = new Date(
+          let thisYearBirthday = new Date(
             today.getFullYear(),
             dob.getMonth(),
             dob.getDate(),
           );
-          if (nextBirthday < today) {
-            nextBirthday.setFullYear(today.getFullYear() + 1);
+
+          // If birthday already passed this year, push to next year
+          if (thisYearBirthday < today) {
+            thisYearBirthday = new Date(
+              today.getFullYear() + 1,
+              dob.getMonth(),
+              dob.getDate(),
+            );
           }
 
-          return {
-            ...e,
-            nextBirthday,
-            daysLeft: Math.ceil(
-              (nextBirthday.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
-            ),
-          };
+          const msLeft = thisYearBirthday.getTime() - today.getTime();
+          const daysLeft = Math.round(msLeft / (1000 * 60 * 60 * 24));
+
+          return { ...e, nextBirthday: thisYearBirthday, daysLeft };
         })
         .sort((a, b) => a.daysLeft - b.daysLeft);
 
@@ -462,13 +471,9 @@ export default function Dashboard() {
     }
   };
 
-  // FIX: filter by month using personal_details.date_of_birth
   const filteredBirthdays = birthdays.filter((emp) => {
     if (selectedMonth === "all") return true;
-    const dobStr = getEmployeeDOB(emp);
-    if (!dobStr) return false;
-    const dob = new Date(dobStr);
-    return dob.getMonth() === Number(selectedMonth);
+    return emp.nextBirthday.getMonth() === Number(selectedMonth);
   });
 
   useEffect(() => {
@@ -489,13 +494,11 @@ export default function Dashboard() {
   };
 
   const leaveDates = allLeaves
-    .filter((l) => (l.status ?? "").toLowerCase() === "approved")
+    .filter((l) => l.status?.toLowerCase() === "approved")
     .flatMap((l) => {
       if (!l.start_date || !l.end_date) return [];
-      const start = new Date(l.start_date);
-      const end = new Date(l.end_date);
-      start.setHours(0, 0, 0, 0);
-      end.setHours(0, 0, 0, 0);
+      const start = toStartOfDay(new Date(l.start_date));
+      const end = toStartOfDay(new Date(l.end_date));
       if (end < today) return [];
       const dates: Date[] = [];
       const temp = new Date(start < today ? today : start);
@@ -519,6 +522,7 @@ export default function Dashboard() {
     return dates;
   });
 
+  // Tooltip content for calendar days
   const getDayInfo = (date: Date) => {
     const current = toStartOfDay(date);
 
@@ -529,25 +533,20 @@ export default function Dashboard() {
       return current >= start && current <= end;
     });
 
-    // FIX: use personal_details for the leave employee name in tooltip
     const leave = allLeaves.find((l) => {
-      if ((l.status ?? "").toLowerCase() !== "approved") return false;
+      if (l.status?.toLowerCase() !== "approved") return false;
       if (!l.start_date || !l.end_date) return false;
       const start = toStartOfDay(new Date(l.start_date));
       const end = toStartOfDay(new Date(l.end_date));
       return current >= start && current <= end;
     });
 
-    if (holiday)
-      return <p className="text-red-700">Holiday: {holiday.name}</p>;
+    if (holiday) return <p className="text-red-700">Holiday: {holiday.name}</p>;
 
     if (leave)
       return (
         <p className="text-green-700">
-          {leave.personal_details
-            ? `${leave.personal_details.first_name} ${leave.personal_details.last_name}`.trim()
-            : "An employee"}{" "}
-          is on leave
+          {getLeaveEmployeeName(leave)} is on leave
         </p>
       );
 
@@ -568,7 +567,8 @@ export default function Dashboard() {
       console.error("Approve error:", err);
       toast({
         title: "Approval failed",
-        description: err?.message ?? "Something went wrong while approving leave",
+        description:
+          err?.message ?? "Something went wrong while approving leave",
         variant: "destructive",
       });
     }
@@ -653,12 +653,10 @@ export default function Dashboard() {
                 <p className="text-sm">No employees on leave today</p>
               </div>
             ) : (
-              todayLeaves.map((l, i) => {
-                // FIX: name comes from personal_details, department from department record
-                const empName = l.personal_details
-                  ? `${l.personal_details.first_name} ${l.personal_details.last_name}`.trim()
-                  : "Unknown";
-                const deptName = l.department?.department_name ?? "Department";
+              todayLeaves.map((leave, i) => {
+                // Read name and dept from the nested employee object
+                const empName = getLeaveEmployeeName(leave);
+                const deptName = getLeaveDepartment(leave);
                 const initials = empName
                   .split(" ")
                   .map((n) => n[0])
@@ -668,7 +666,7 @@ export default function Dashboard() {
 
                 return (
                   <div
-                    key={l.id ?? i}
+                    key={leave.id ?? i}
                     className="flex items-center justify-between px-3 py-2.5 rounded-lg hover:bg-accent/10 transition-colors"
                   >
                     <div className="flex items-center gap-2.5">
@@ -678,17 +676,18 @@ export default function Dashboard() {
                       <div>
                         <p className="text-sm font-medium">{empName}</p>
                         <p className="text-[11px] text-muted-foreground">
-                          {deptName} · {l.start_date?.split("T")[0]} –{" "}
-                          {l.end_date?.split("T")[0]}
+                          {deptName} · {leave.start_date?.split("T")[0]} –{" "}
+                          {leave.end_date?.split("T")[0]}
                         </p>
                       </div>
                     </div>
                     <span
                       className={`status-pill ${
-                        leaveStatusClass[l.leave_type ?? ""] ?? "status-pending"
+                        leaveStatusClass[leave.leaveType?.name ?? ""] ??
+                        "status-pending"
                       }`}
                     >
-                      {l.leave_type ?? "Leave"}
+                      {leave.leaveType?.name ?? "Leave"}
                     </span>
                   </div>
                 );
@@ -846,6 +845,9 @@ export default function Dashboard() {
                         <p className="text-sm font-medium truncate">
                           {action.name}
                         </p>
+                        <p className="text-[10px] text-muted-foreground mt-0.5 truncate">
+                          {action.dept}
+                        </p>
                         <div className="flex items-center gap-1.5 mt-1">
                           <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary font-medium">
                             {action.description}
@@ -975,7 +977,6 @@ export default function Dashboard() {
           ) : (
             filteredBirthdays.map((emp) => {
               const isToday = emp.daysLeft === 0;
-              // FIX: read name and DOB through helpers, not top-level emp.*
               const name = getEmployeeName(emp);
               const dobStr = getEmployeeDOB(emp);
               const dob = dobStr ? new Date(dobStr) : null;
@@ -1005,7 +1006,6 @@ export default function Dashboard() {
                     </div>
                     <div>
                       <p className="text-sm font-medium">{name}</p>
-                      {/* FIX: department from getLatestDepartment */}
                       <p className="text-xs text-muted-foreground">
                         {getEmployeeDeptName(emp)}
                       </p>

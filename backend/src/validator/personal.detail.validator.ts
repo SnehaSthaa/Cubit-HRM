@@ -43,6 +43,7 @@ export const updatePersonalDetailSchema = z.object({
   father_name: z.string().optional(),
   mother_name: z.string().optional(),
   grandfather_name: z.string().optional(),
+  spouse_name: z.string().optional(),
   current_address: z.string().optional(),
   permanent_address: z.string().optional(),
   country: z.string().optional(),
