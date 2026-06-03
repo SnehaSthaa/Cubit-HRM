@@ -90,6 +90,14 @@ const enumToLeaveType: Record<string, string> = {
   compensatory: "Compensatory Leave",
 };
 
+const profileSectionLabels: Record<string, string> = {
+  personal: "Personal Info",
+  bank_details: "Bank Details",
+  department: "Department",
+  emergency: "Emergency Contact",
+  documents: "Documents",
+};
+
 const normaliseStatus = (s?: string) => {
   if (!s) return "Pending";
   const map: Record<string, string> = {
@@ -121,50 +129,35 @@ interface Holiday {
   name: string;
 }
 
-interface ActivityRecord {
-  text: string;
-  time: string;
-  type: "clockin" | "leave" | "new" | "exit";
-}
-
 interface PendingAction {
   id: string;
   type: string;
   description: string;
   priority: string;
-  /** Display name derived from the employee's personal_details */
   name: string;
   dept: string;
   time: string;
+  source: "leave" | "profile";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: safely read name / department from the normalised Employee type
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Returns "First Last" from personal_details, falling back to Employee.name */
 function getEmployeeName(emp: Employee): string {
   const pd = emp.personal_details;
   const full = `${pd?.first_name ?? ""} ${pd?.last_name ?? ""}`.trim();
   return full || emp.name || emp.email || "Unknown";
 }
 
-/** Returns the current department name using the canonical helper */
 function getEmployeeDeptName(emp: Employee): string {
   return getLatestDepartment(emp.department)?.department_name ?? "—";
 }
 
-/** Returns the date_of_birth string from personal_details */
 function getEmployeeDOB(emp: Employee): string | undefined {
   return emp.personal_details?.date_of_birth;
 }
 
-/**
- * Returns the employment_status string.
- * The status lives in personal_details on the API shape but is also
- * exposed via the latest DepartmentRecord's employment_status field.
- * We prefer personal_details first.
- */
 function getEmploymentStatus(emp: Employee): string {
   return (
     emp.personal_details?.employment_status ??
@@ -188,53 +181,27 @@ export default function Dashboard() {
   const { isHR } = useRole();
   const { toast } = useToast();
   const [showCalendar, setShowCalendar] = useState(false);
-  const [calendarDate, setCalendarDate] = useState<Date | undefined>(
-    new Date(),
-  );
+  const [calendarDate, setCalendarDate] = useState<Date | undefined>(new Date());
   const [birthdays, setBirthdays] = useState<EmployeeWithBirthday[]>([]);
   const [selectedMonth, setSelectedMonth] = useState<string>("all");
-  const [selectedRequest, setSelectedRequest] = useState<LeaveRequest | null>(
-    null,
-  );
+  const [selectedRequest, setSelectedRequest] = useState<LeaveRequest | null>(null);
   const [rejectDialog, setRejectDialog] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
 
   const [stats, setStats] = useState<StatItem[]>([
-    {
-      label: "Active Employees",
-      value: 0,
-      icon: Users,
-      change: "—",
-      positive: true,
-    },
-    {
-      label: "Pending Offboarding",
-      value: 0,
-      icon: UserPlus,
-      change: "—",
-      positive: true,
-    },
-    {
-      label: "On Leave Today",
-      value: 0,
-      icon: CalendarDays,
-      change: "—",
-      positive: true,
-    },
-    {
-      label: "Clearance Required",
-      value: 0,
-      icon: AlertTriangle,
-      change: "—",
-      positive: true,
-    },
+    { label: "Active Employees",   value: 0, icon: Users,         change: "—", positive: true },
+    { label: "Pending Offboarding", value: 0, icon: UserPlus,      change: "—", positive: true },
+    { label: "On Leave Today",      value: 0, icon: CalendarDays,  change: "—", positive: true },
+    { label: "Clearance Required",  value: 0, icon: AlertTriangle, change: "—", positive: true },
   ]);
 
-  const [todayLeaves, setTodayLeaves] = useState<LeaveData[]>([]);
-  const [allLeaves, setAllLeaves] = useState<LeaveData[]>([]);
-  const [currentEmployeeId, setCurrentEmployeeId] = useState<string | null>(
-    null,
-  );
+  const [todayLeaves, setTodayLeaves]           = useState<LeaveData[]>([]);
+  const [allLeaves, setAllLeaves]               = useState<LeaveData[]>([]);
+  const [currentEmployeeId, setCurrentEmployeeId] = useState<string | null>(null);
+  const [requests, setRequests]                 = useState<LeaveRequest[]>([]);
+  const [upcomingHolidays, setUpcomingHolidays] = useState<Holiday[]>([]);
+  const [pendingActions, setPendingActions]     = useState<PendingAction[]>([]);
+  const [loading, setLoading]                   = useState(true);
 
   useEffect(() => {
     if (!isHR) {
@@ -243,11 +210,6 @@ export default function Dashboard() {
       });
     }
   }, [isHR]);
-
-  const [requests, setRequests] = useState<LeaveRequest[]>([]);
-  const [upcomingHolidays, setUpcomingHolidays] = useState<Holiday[]>([]);
-  const [pendingActions, setPendingActions] = useState<PendingAction[]>([]);
-  const [loading, setLoading] = useState(true);
 
   // ── Fetch leave requests (HR sees all; employee sees own) ──────────────────
   const fetchLeaves = async () => {
@@ -266,9 +228,8 @@ export default function Dashboard() {
       const mapped: LeaveRequest[] = data.map((l: LeaveApiResponse) => {
         const empName =
           typeof l.employee === "object"
-            ? ((l.employee as { user?: { name?: string }; name?: string })?.user
-                ?.name ??
-              (l.employee as { user?: { name?: string }; name?: string })?.name)
+            ? ((l.employee as { user?: { name?: string }; name?: string })?.user?.name ??
+               (l.employee as { user?: { name?: string }; name?: string })?.name)
             : (l.employee ?? l.employee_name ?? "Unknown");
 
         const policyName =
@@ -288,8 +249,7 @@ export default function Dashboard() {
           appliedOn: l.created_at?.split("T")[0] ?? "",
           approvedBy: l.approved_by ?? l.approvedBy,
           remarks: l.remarks,
-          rejectionReason:
-            l.rejection_reason ?? l.approval_notes ?? l.rejectionReason,
+          rejectionReason: l.rejection_reason ?? l.approval_notes ?? l.rejectionReason,
         };
       });
 
@@ -304,23 +264,23 @@ export default function Dashboard() {
     try {
       setLoading(true);
 
-      const [employeesRes, leavesRes, holidaysRes] = await Promise.all([
-        apiClient.getEmployees(),
-        apiClient.getLeaves(),
-        apiClient.getHolidays(),
-      ]);
+      const [employeesRes, leavesRes, holidaysRes, profileRequestsRes] =
+        await Promise.all([
+          apiClient.getEmployees(),
+          apiClient.getLeaves(),
+          apiClient.getHolidays(),
+          apiClient.getProfileUpdateRequests({ status: "pending", limit: 50 }),
+        ]);
 
       const employees: Employee[] = Array.isArray(employeesRes.data)
         ? employeesRes.data.map(normalizeEmployee)
         : [];
 
-      // Raw leave records from backend (LeaveData shape)
       const rawLeaves: LeaveData[] = Array.isArray(leavesRes.data)
         ? leavesRes.data
         : [];
 
-      // Build pending actions from raw leave records.
-      // FIX: use personal_details.first_name / last_name, not leave.employee.*
+      // ── Pending leave actions ──────────────────────────────────────────────
       const pendingLeaveActions: PendingAction[] = rawLeaves
         .filter((leave) => leave.status?.toLowerCase() === "pending")
         .map((leave) => ({
@@ -331,84 +291,85 @@ export default function Dashboard() {
             leave.leave_type ??
             "Leave Request",
           priority: "medium",
-          // FIX: name comes from personal_details, not a flat .employee object
           name: leave.personal_details
             ? `${leave.personal_details.first_name} ${leave.personal_details.last_name}`.trim()
             : "Unknown",
-          // FIX: department name from the nested DepartmentRecord
           dept: leave.department?.department_name ?? "—",
           time: leave.start_date?.split("T")[0] ?? "—",
+          source: "leave" as const,
         }));
 
+      // ── Pending profile update actions ────────────────────────────────────
+      const rawProfileRequests = Array.isArray(profileRequestsRes.data)
+        ? profileRequestsRes.data
+        : [];
+
+      const pendingProfileActions: PendingAction[] = rawProfileRequests.map((req) => {
+        const pd = req.employee?.personal_details;
+        const name = pd
+          ? `${pd.first_name ?? ""} ${pd.last_name ?? ""}`.trim()
+          : req.employee?.user?.name ?? req.employee?.user?.email ?? "Unknown";
+
+        // department is an array on Employee; take the last entry
+        const dept =
+          Array.isArray(req.employee?.department)
+            ? (req.employee.department.slice(-1)[0]?.department_name ?? "—")
+            : "—";
+
+        return {
+          id: req.id,
+          type: "profile",
+          description: profileSectionLabels[req.section] ?? req.section,
+          priority: "medium",
+          name,
+          dept,
+          time: req.created_at?.split("T")[0] ?? "—",
+          source: "profile" as const,
+        };
+      });
+
+      // ── Today's leaves ─────────────────────────────────────────────────────
       const today = new Date();
       today.setHours(0, 0, 0, 0);
 
       const todayLeavesList = rawLeaves.filter((leave) => {
         if (!leave.start_date || !leave.end_date) return false;
         const start = new Date(leave.start_date);
-        const end = new Date(leave.end_date);
+        const end   = new Date(leave.end_date);
         start.setHours(0, 0, 0, 0);
         end.setHours(0, 0, 0, 0);
-        const approved =
-          !leave.status || leave.status.toLowerCase() === "approved";
+        const approved = !leave.status || leave.status.toLowerCase() === "approved";
         return start <= today && today <= end && approved;
       });
 
+      // ── Holidays ───────────────────────────────────────────────────────────
       const holidays: Holiday[] = Array.isArray(holidaysRes.data)
         ? holidaysRes.data.map(
             (h: { id?: string; name?: string; start_date?: string; end_date?: string }) => ({
               id: h.id,
               name: h.name ?? "Holiday",
               start_date: h.start_date?.split("T")[0] ?? "",
-              end_date: h.end_date?.split("T")[0] ?? "",
+              end_date:   h.end_date?.split("T")[0]   ?? "",
             }),
           )
         : [];
 
-      // FIX: use getEmploymentStatus helper instead of emp.employment_status
-      const activeEmployees = employees.filter(
-        (e) => getEmploymentStatus(e) === "active",
-      );
-
-      const pendingOffboarding = employees.filter(
-        (e) => getEmploymentStatus(e) === "notice_period",
-      );
+      // ── Stats ──────────────────────────────────────────────────────────────
+      const activeEmployees    = employees.filter((e) => getEmploymentStatus(e) === "active");
+      const pendingOffboarding = employees.filter((e) => getEmploymentStatus(e) === "notice_period");
 
       setStats([
-        {
-          label: "Active Employees",
-          value: activeEmployees.length,
-          icon: Users,
-          change: "—",
-          positive: true,
-        },
-        {
-          label: "Pending Offboarding",
-          value: pendingOffboarding.length,
-          icon: UserPlus,
-          change: "—",
-          positive: true,
-        },
-        {
-          label: "On Leave Today",
-          value: todayLeavesList.length,
-          icon: CalendarDays,
-          change: "—",
-          positive: true,
-        },
-        {
-          label: "Clearance Required",
-          value: 0,
-          icon: AlertTriangle,
-          change: "—",
-          positive: true,
-        },
+        { label: "Active Employees",    value: activeEmployees.length,    icon: Users,         change: "—", positive: true },
+        { label: "Pending Offboarding", value: pendingOffboarding.length, icon: UserPlus,      change: "—", positive: true },
+        { label: "On Leave Today",      value: todayLeavesList.length,    icon: CalendarDays,  change: "—", positive: true },
+        { label: "Clearance Required",  value: 0,                         icon: AlertTriangle, change: "—", positive: true },
       ]);
 
       setTodayLeaves(todayLeavesList);
       setAllLeaves(rawLeaves);
       setUpcomingHolidays(holidays);
-      setPendingActions(pendingLeaveActions);
+      // Merge both action types — profile requests first so they surface prominently
+      setPendingActions([...pendingProfileActions, ...pendingLeaveActions]);
     } catch (err) {
       console.error("Dashboard error:", err);
     } finally {
@@ -427,24 +388,14 @@ export default function Dashboard() {
       const today = new Date();
 
       const upcoming: EmployeeWithBirthday[] = employees
-        .filter((e) => {
-          const status = getEmploymentStatus(e);
-          return ["active", "notice_period"].includes(status);
-        })
-        // FIX: DOB lives in personal_details, not top-level
+        .filter((e) => ["active", "notice_period"].includes(getEmploymentStatus(e)))
         .filter((e) => !!getEmployeeDOB(e))
         .map((e) => {
           const dobStr = getEmployeeDOB(e)!;
-          const dob = new Date(dobStr);
+          const dob    = new Date(dobStr);
 
-          const nextBirthday = new Date(
-            today.getFullYear(),
-            dob.getMonth(),
-            dob.getDate(),
-          );
-          if (nextBirthday < today) {
-            nextBirthday.setFullYear(today.getFullYear() + 1);
-          }
+          const nextBirthday = new Date(today.getFullYear(), dob.getMonth(), dob.getDate());
+          if (nextBirthday < today) nextBirthday.setFullYear(today.getFullYear() + 1);
 
           return {
             ...e,
@@ -462,13 +413,11 @@ export default function Dashboard() {
     }
   };
 
-  // FIX: filter by month using personal_details.date_of_birth
   const filteredBirthdays = birthdays.filter((emp) => {
     if (selectedMonth === "all") return true;
     const dobStr = getEmployeeDOB(emp);
     if (!dobStr) return false;
-    const dob = new Date(dobStr);
-    return dob.getMonth() === Number(selectedMonth);
+    return new Date(dobStr).getMonth() === Number(selectedMonth);
   });
 
   useEffect(() => {
@@ -493,7 +442,7 @@ export default function Dashboard() {
     .flatMap((l) => {
       if (!l.start_date || !l.end_date) return [];
       const start = new Date(l.start_date);
-      const end = new Date(l.end_date);
+      const end   = new Date(l.end_date);
       start.setHours(0, 0, 0, 0);
       end.setHours(0, 0, 0, 0);
       if (end < today) return [];
@@ -509,7 +458,7 @@ export default function Dashboard() {
   const holidayDates = upcomingHolidays.flatMap((h) => {
     if (!h.start_date || !h.end_date) return [];
     const start = toStartOfDay(new Date(h.start_date));
-    const end = toStartOfDay(new Date(h.end_date));
+    const end   = toStartOfDay(new Date(h.end_date));
     const dates: Date[] = [];
     const temp = new Date(start);
     while (temp <= end) {
@@ -525,21 +474,19 @@ export default function Dashboard() {
     const holiday = upcomingHolidays.find((h) => {
       if (!h.start_date || !h.end_date) return false;
       const start = toStartOfDay(new Date(h.start_date));
-      const end = toStartOfDay(new Date(h.end_date));
+      const end   = toStartOfDay(new Date(h.end_date));
       return current >= start && current <= end;
     });
 
-    // FIX: use personal_details for the leave employee name in tooltip
     const leave = allLeaves.find((l) => {
       if ((l.status ?? "").toLowerCase() !== "approved") return false;
       if (!l.start_date || !l.end_date) return false;
       const start = toStartOfDay(new Date(l.start_date));
-      const end = toStartOfDay(new Date(l.end_date));
+      const end   = toStartOfDay(new Date(l.end_date));
       return current >= start && current <= end;
     });
 
-    if (holiday)
-      return <p className="text-red-700">Holiday: {holiday.name}</p>;
+    if (holiday) return <p className="text-red-700">Holiday: {holiday.name}</p>;
 
     if (leave)
       return (
@@ -554,49 +501,58 @@ export default function Dashboard() {
     return null;
   };
 
-  // ── Approve / Reject handlers ──────────────────────────────────────────────
-  const handleApprove = async (id: string) => {
-    if (!id) {
-      toast({ title: "Invalid leave ID", variant: "destructive" });
-      return;
-    }
+  // ── Approve handler — branches on action source ───────────────────────────
+  const handleApproveAction = async (action: PendingAction) => {
     try {
-      await apiClient.approveLeave(id, "Approved from dashboard");
-      await fetchDashboardData();
-      toast({ title: "Leave approved successfully" });
-    } catch (err) {
-      console.error("Approve error:", err);
+      if (action.source === "profile") {
+        await apiClient.approveProfileUpdateRequest(action.id);
+        setPendingActions((prev) => prev.filter((a) => a.id !== action.id));
+        toast({ title: "Profile update approved", description: `${action.name}'s ${action.description} has been updated.` });
+      } else {
+        if (!action.id) {
+          toast({ title: "Invalid leave ID", variant: "destructive" });
+          return;
+        }
+        await apiClient.approveLeave(action.id, "Approved from dashboard");
+        await fetchDashboardData();
+        toast({ title: "Leave approved successfully" });
+      }
+    } catch (err: unknown) {
       toast({
         title: "Approval failed",
-        description: err?.message ?? "Something went wrong while approving leave",
+        description: err instanceof Error ? err.message : "Something went wrong",
         variant: "destructive",
       });
     }
   };
 
+  // ── Reject handler — branches on selectedRequest.type ────────────────────
   const handleReject = async () => {
     if (!rejectReason.trim() || !selectedRequest) return;
     try {
-      await apiClient.rejectLeave(selectedRequest.id, rejectReason);
+      if (selectedRequest.type === "profile") {
+        await apiClient.rejectProfileUpdateRequest(selectedRequest.id, rejectReason.trim());
+      } else {
+        await apiClient.rejectLeave(selectedRequest.id, rejectReason);
+      }
       await fetchDashboardData();
       await fetchLeaves();
       setRejectDialog(false);
       setRejectReason("");
       setSelectedRequest(null);
-      toast({ title: "Leave rejected" });
+      toast({
+        title: selectedRequest.type === "profile"
+          ? "Profile update rejected"
+          : "Leave rejected",
+      });
     } catch {
-      toast({ title: "Error", description: "Failed to reject leave." });
+      toast({ title: "Error", description: "Failed to reject request." });
     }
   };
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <motion.div
-      variants={container}
-      initial="hidden"
-      animate="show"
-      className="space-y-6"
-    >
+    <motion.div variants={container} initial="hidden" animate="show" className="space-y-6">
       <motion.div variants={item}>
         <h1 className="text-xl font-bold text-foreground">Dashboard</h1>
         <p className="text-sm text-muted-foreground mt-1">
@@ -626,9 +582,7 @@ export default function Dashboard() {
                 </span>
               )}
             </div>
-            <p className="text-3xl font-bold font-mono-data tracking-tight">
-              {stat.value}
-            </p>
+            <p className="text-3xl font-bold font-mono-data tracking-tight">{stat.value}</p>
             <p className="text-xs text-muted-foreground mt-1">{stat.label}</p>
           </div>
         ))}
@@ -643,9 +597,7 @@ export default function Dashboard() {
               <CalendarDays className="w-4 h-4 text-primary" />
               <h2 className="text-sm font-semibold">On Leave Today</h2>
             </div>
-            <span className="status-pill status-pending">
-              {todayLeaves.length}
-            </span>
+            <span className="status-pill status-pending">{todayLeaves.length}</span>
           </div>
           <div className="p-2">
             {todayLeaves.length === 0 ? (
@@ -654,17 +606,11 @@ export default function Dashboard() {
               </div>
             ) : (
               todayLeaves.map((l, i) => {
-                // FIX: name comes from personal_details, department from department record
                 const empName = l.personal_details
                   ? `${l.personal_details.first_name} ${l.personal_details.last_name}`.trim()
                   : "Unknown";
                 const deptName = l.department?.department_name ?? "Department";
-                const initials = empName
-                  .split(" ")
-                  .map((n) => n[0])
-                  .join("")
-                  .substring(0, 2)
-                  .toUpperCase();
+                const initials = empName.split(" ").map((n) => n[0]).join("").substring(0, 2).toUpperCase();
 
                 return (
                   <div
@@ -678,16 +624,11 @@ export default function Dashboard() {
                       <div>
                         <p className="text-sm font-medium">{empName}</p>
                         <p className="text-[11px] text-muted-foreground">
-                          {deptName} · {l.start_date?.split("T")[0]} –{" "}
-                          {l.end_date?.split("T")[0]}
+                          {deptName} · {l.start_date?.split("T")[0]} – {l.end_date?.split("T")[0]}
                         </p>
                       </div>
                     </div>
-                    <span
-                      className={`status-pill ${
-                        leaveStatusClass[l.leave_type ?? ""] ?? "status-pending"
-                      }`}
-                    >
+                    <span className={`status-pill ${leaveStatusClass[l.leave_type ?? ""] ?? "status-pending"}`}>
                       {l.leave_type ?? "Leave"}
                     </span>
                   </div>
@@ -729,12 +670,9 @@ export default function Dashboard() {
                     },
                   }}
                   modifiersClassNames={{
-                    holiday:
-                      "text-red-600 font-semibold bg-red-50 rounded-md border border-red-100",
-                    leave:
-                      "text-green-600 font-semibold bg-green-50 rounded-md border border-green-200",
-                    weekend:
-                      "text-red-600 font-semibold bg-red-50 rounded-md border border-red-100",
+                    holiday: "text-red-600 font-semibold bg-red-50 rounded-md border border-red-100",
+                    leave:   "text-green-600 font-semibold bg-green-50 rounded-md border border-green-200",
+                    weekend: "text-red-600 font-semibold bg-red-50 rounded-md border border-red-100",
                   }}
                   components={{
                     DayContent: ({ date }) => {
@@ -784,25 +722,17 @@ export default function Dashboard() {
                   >
                     <div className="w-10 h-10 rounded-lg bg-primary/10 flex flex-col items-center justify-center shrink-0">
                       <span className="text-[10px] font-semibold text-primary leading-none">
-                        {new Date(h.start_date).toLocaleDateString("en", {
-                          month: "short",
-                        })}
+                        {new Date(h.start_date).toLocaleDateString("en", { month: "short" })}
                       </span>
                       {h.start_date === h.end_date ? (
                         <span className="text-[10px] text-muted-foreground">
-                          {new Date(h.start_date).toLocaleDateString("en", {
-                            day: "numeric",
-                          })}
+                          {new Date(h.start_date).toLocaleDateString("en", { day: "numeric" })}
                         </span>
                       ) : (
                         <span className="text-[10px] text-muted-foreground">
-                          {new Date(h.start_date).toLocaleDateString("en", {
-                            day: "numeric",
-                          })}
+                          {new Date(h.start_date).toLocaleDateString("en", { day: "numeric" })}
                           {" – "}
-                          {new Date(h.end_date).toLocaleDateString("en", {
-                            day: "numeric",
-                          })}
+                          {new Date(h.end_date).toLocaleDateString("en", { day: "numeric" })}
                         </span>
                       )}
                     </div>
@@ -810,8 +740,7 @@ export default function Dashboard() {
                       <p className="text-sm font-medium">{h.name}</p>
                       <p className="text-xs text-muted-foreground font-mono-data">
                         {Math.round(
-                          (new Date(h.end_date).getTime() -
-                            new Date(h.start_date).getTime()) /
+                          (new Date(h.end_date).getTime() - new Date(h.start_date).getTime()) /
                             (1000 * 60 * 60 * 24),
                         ) + 1}{" "}
                         days
@@ -829,10 +758,9 @@ export default function Dashboard() {
           <motion.div variants={item} className="glass-card overflow-hidden">
             <div className="flex items-center justify-between px-5 py-4 border-b border-border">
               <h2 className="text-sm font-semibold">Pending Actions</h2>
-              <span className="status-pill status-pending">
-                {pendingActions.length} items
-              </span>
+              <span className="status-pill status-pending">{pendingActions.length} items</span>
             </div>
+
             {pendingActions.length === 0 ? (
               <div className="flex items-center justify-center py-12 text-muted-foreground">
                 <p className="text-sm">No pending actions</p>
@@ -843,10 +771,19 @@ export default function Dashboard() {
                   <div key={action.id} className="px-4 py-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium truncate">
-                          {action.name}
-                        </p>
-                        <div className="flex items-center gap-1.5 mt-1">
+                        <p className="text-sm font-medium truncate">{action.name}</p>
+                        <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                          {/* Source badge — profile vs leave */}
+                          <span
+                            className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                              action.source === "profile"
+                                ? "bg-violet-100 text-violet-600 dark:bg-violet-950/40 dark:text-violet-400"
+                                : "bg-blue-100 text-blue-600 dark:bg-blue-950/40 dark:text-blue-400"
+                            }`}
+                          >
+                            {action.source === "profile" ? "Profile" : "Leave"}
+                          </span>
+                          {/* Description */}
                           <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary font-medium">
                             {action.description}
                           </span>
@@ -857,7 +794,7 @@ export default function Dashboard() {
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
                         <button
-                          onClick={() => handleApprove(action.id)}
+                          onClick={() => handleApproveAction(action)}
                           className="px-2.5 py-1 text-xs rounded-md bg-green-600 text-white hover:bg-green-700 transition-colors font-medium"
                         >
                           Approve
@@ -867,7 +804,7 @@ export default function Dashboard() {
                             setSelectedRequest({
                               id: action.id,
                               employee: action.name,
-                              type: action.type,
+                              type: action.source === "profile" ? "profile" : action.type,
                               from: "",
                               to: "",
                               days: 0,
@@ -897,7 +834,11 @@ export default function Dashboard() {
         <Dialog open={rejectDialog} onOpenChange={setRejectDialog}>
           <DialogContent className="max-w-md">
             <DialogHeader>
-              <DialogTitle>Reject Leave Request</DialogTitle>
+              <DialogTitle>
+                {selectedRequest?.type === "profile"
+                  ? "Reject Profile Update"
+                  : "Reject Leave Request"}
+              </DialogTitle>
             </DialogHeader>
             <div className="space-y-4 pt-2">
               <p className="text-sm text-muted-foreground">
@@ -905,7 +846,11 @@ export default function Dashboard() {
                 <span className="font-medium text-foreground">
                   {selectedRequest?.employee}
                 </span>
-                's leave request.
+                's{" "}
+                {selectedRequest?.type === "profile"
+                  ? "profile update request"
+                  : "leave request"}
+                .
               </p>
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">
@@ -935,7 +880,7 @@ export default function Dashboard() {
                   onClick={handleReject}
                   disabled={!rejectReason.trim()}
                 >
-                  Reject Leave
+                  {selectedRequest?.type === "profile" ? "Reject Update" : "Reject Leave"}
                 </Button>
               </div>
             </div>
@@ -975,16 +920,10 @@ export default function Dashboard() {
           ) : (
             filteredBirthdays.map((emp) => {
               const isToday = emp.daysLeft === 0;
-              // FIX: read name and DOB through helpers, not top-level emp.*
-              const name = getEmployeeName(emp);
-              const dobStr = getEmployeeDOB(emp);
-              const dob = dobStr ? new Date(dobStr) : null;
-              const initials = name
-                .split(" ")
-                .map((n) => n[0])
-                .join("")
-                .substring(0, 2)
-                .toUpperCase();
+              const name    = getEmployeeName(emp);
+              const dobStr  = getEmployeeDOB(emp);
+              const dob     = dobStr ? new Date(dobStr) : null;
+              const initials = name.split(" ").map((n) => n[0]).join("").substring(0, 2).toUpperCase();
 
               return (
                 <div
@@ -994,21 +933,14 @@ export default function Dashboard() {
                   <div className="flex gap-5">
                     <div className="w-12 h-12 rounded-sm bg-primary/10 flex items-center justify-center text-[10px] font-medium text-primary shrink-0 overflow-hidden">
                       {emp.profile_image ? (
-                        <img
-                          src={emp.profile_image}
-                          className="w-full h-full object-cover"
-                          alt={name}
-                        />
+                        <img src={emp.profile_image} className="w-full h-full object-cover" alt={name} />
                       ) : (
                         initials || "E"
                       )}
                     </div>
                     <div>
                       <p className="text-sm font-medium">{name}</p>
-                      {/* FIX: department from getLatestDepartment */}
-                      <p className="text-xs text-muted-foreground">
-                        {getEmployeeDeptName(emp)}
-                      </p>
+                      <p className="text-xs text-muted-foreground">{getEmployeeDeptName(emp)}</p>
                     </div>
                   </div>
 
@@ -1020,11 +952,7 @@ export default function Dashboard() {
                     ) : dob ? (
                       <div className="flex flex-col gap-3">
                         <span className="flex text-xs flex-col gap-1 items-center justify-center rounded-md h-10 w-10 font-bold text-orange-600 bg-orange-100 leading-none">
-                          <span>
-                            {dob
-                              .toLocaleString("en-US", { month: "short" })
-                              .toUpperCase()}
-                          </span>
+                          <span>{dob.toLocaleString("en-US", { month: "short" }).toUpperCase()}</span>
                           <span>{dob.getDate()}</span>
                         </span>
                         <span className="text-xs text-muted-foreground font-mono-data">

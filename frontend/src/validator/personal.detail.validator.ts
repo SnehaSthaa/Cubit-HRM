@@ -79,15 +79,15 @@ export const updatePersonalDetailSchema = z.object({
   nid_number: z.string().optional(),
   ssf_ssid: z.string().optional(),
 
-  // ssid_number: z.preprocess(
-  //   (val) => (val === "" || val === null ? undefined : val),
-  //   z
-  //     .string()
-  //     .regex(/^\d+$/, "SSID number must contain only digits")
-  //     .min(5, "SSID number must be at least 5 digits")
-  //     .max(20, "SSID number must be at most 20 digits")
-  //     .optional(),
-  // ),
+  ssid_number: z.preprocess(
+    (val) => (val === "" || val === null ? undefined : val),
+    z
+      .string()
+      .regex(/^\d+$/, "SSID number must contain only digits")
+      .min(5, "SSID number must be at least 5 digits")
+      .max(20, "SSID number must be at most 20 digits")
+      .optional(),
+  ),
 
   ssf_number: z.preprocess(
     (val) => (val === "" || val === null ? undefined : val),

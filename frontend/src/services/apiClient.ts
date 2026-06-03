@@ -162,6 +162,39 @@ interface HolidayApi {
   holiday_type: "public" | "company" | "regional" | "religious";
 }
 
+// ── Profile Update Requests ───────────────────────────────────────────────────
+export type ProfileSection =
+  | "personal"
+  | "documents"
+  | "emergency"
+  | "bank_details"
+  | "department";
+
+export type RequestStatus = "pending" | "approved" | "rejected";
+
+export interface ProfileUpdateRequest {
+  id: string;
+  employee_id: string;
+  section: ProfileSection;
+  requested_data: Record<string, unknown>;
+  status: "pending" | "approved" | "rejected";
+  created_at: string;
+  updated_at: string;
+  reviewed_by?: string;
+  reviewed_at?: string;
+  reviewer_notes?: string;
+  employee?: {
+    id?: string;
+    employee_id?: string;
+    personal_details?: { first_name?: string; last_name?: string };
+    user?: { name?: string; email?: string };
+    department?: Array<{
+      department_name?: string;
+      employment_status?: string;
+    }>; // ← add this
+  };
+}
+
 class ApiClient {
   private client: AxiosInstance;
 
@@ -686,6 +719,70 @@ class ApiClient {
   completeOffboarding(employeeId: string) {
     return this.parse(
       this.client.patch<ApiResponse>(`/offboarding/${employeeId}/complete`),
+    );
+  }
+
+  // ── PROFILE UPDATE REQUESTS ───────────────────────────────────────────────
+
+  getProfileUpdateRequests(params?: {
+    status?: RequestStatus;
+    section?: ProfileSection;
+    page?: number;
+    limit?: number;
+  }) {
+    return this.parse<ProfileUpdateRequest[]>(
+      this.client.get<ApiResponse<ProfileUpdateRequest[]>>(
+        "/profile-update-requests",
+        { params },
+      ),
+    );
+  }
+
+  getMyProfileUpdateRequests(params?: {
+    status?: RequestStatus;
+    section?: ProfileSection;
+  }) {
+    return this.parse<ProfileUpdateRequest[]>(
+      this.client.get<ApiResponse<ProfileUpdateRequest[]>>(
+        "/profile-update-requests/my",
+        { params },
+      ),
+    );
+  }
+
+  createProfileUpdateRequest(data: {
+    section: ProfileSection;
+    requested_data: Record<string, unknown>;
+  }) {
+    return this.parse<ProfileUpdateRequest>(
+      this.client.post<ApiResponse<ProfileUpdateRequest>>(
+        "/profile-update-requests",
+        data,
+      ),
+    );
+  }
+
+  approveProfileUpdateRequest(id: string, reviewer_notes?: string) {
+    return this.parse<ProfileUpdateRequest>(
+      this.client.patch<ApiResponse<ProfileUpdateRequest>>(
+        `/profile-update-requests/${id}/approve`,
+        { reviewer_notes },
+      ),
+    );
+  }
+
+  rejectProfileUpdateRequest(id: string, reviewer_notes: string) {
+    return this.parse<ProfileUpdateRequest>(
+      this.client.patch<ApiResponse<ProfileUpdateRequest>>(
+        `/profile-update-requests/${id}/reject`,
+        { reviewer_notes },
+      ),
+    );
+  }
+
+  cancelProfileUpdateRequest(id: string) {
+    return this.parse<void>(
+      this.client.delete<ApiResponse<void>>(`/profile-update-requests/${id}`),
     );
   }
 }

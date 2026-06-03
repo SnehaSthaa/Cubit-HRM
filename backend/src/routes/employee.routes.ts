@@ -1,87 +1,68 @@
 import { Router } from "express";
 import { EmployeeController } from "../controllers/employee.controller.js";
-import {
-  authenticate,
-  authorize,
-  hasRequiredPermission,
-} from "../middleware/auth.js";
-import { uploadImage } from "@/middleware/upload.js";
-import { EmployeesAction } from "@/permissions/permission.js";
-import { validate } from "@/middleware/validate.js";
-import {
-  createEmployeeSchema,
-  updateEmployeeSchema,
-} from "../validator/employee.validator.js";
+import { authenticate, authorize } from "../middleware/auth.js";
+import multer from "multer";
 
 const router = Router();
+const upload = multer({ storage: multer.memoryStorage() });
 
 router.use(authenticate);
 
 router.get(
   "/",
   authorize("hr_admin", "super_admin", "employee"),
-  hasRequiredPermission([EmployeesAction.View]),
+  // hasRequiredPermission([EmployeesAction.View]),
   EmployeeController.getAll,
 );
 
-router.post(
-  "/",
-  authorize("super_admin", "hr_admin"),
-  hasRequiredPermission([EmployeesAction.Create]),
-  validate(createEmployeeSchema),
-  EmployeeController.create,
-);
-
-// router.post(
-//   "/cleanup-departments",
-//   authorize("super_admin"),
-//   hasRequiredPermission([EmployeesAction.Delete]),
-//   EmployeeController.cleanupDuplicateDepartments,
-// );
-
+// ── GET /employees/:id ───────────────────────────────────────────────────────
 router.get(
   "/:id",
-  authorize("super_admin", "hr_admin", "employee"),
-  hasRequiredPermission([EmployeesAction.View]),
+  authorize("hr_admin", "super_admin", "employee"),
   EmployeeController.getById,
 );
 
-router.put(
-  "/:id",
-  authorize("super_admin", "hr_admin"),
-  hasRequiredPermission([EmployeesAction.Edit]),
-  validate(updateEmployeeSchema),
-  EmployeeController.update,
+// ── POST /employees ──────────────────────────────────────────────────────────
+router.post(
+  "/",
+  authorize("hr_admin", "super_admin"),
+  EmployeeController.create,
 );
 
+// ── PATCH /employees/:id ─────────────────────────────────────────────────────
 router.patch(
   "/:id",
-  authorize("super_admin", "hr_admin"),
-  hasRequiredPermission([EmployeesAction.Edit]),
-  validate(updateEmployeeSchema),
+  authorize("hr_admin", "super_admin", "employee"),
   EmployeeController.update,
 );
 
+// ── DELETE /employees/:id ────────────────────────────────────────────────────
 router.delete(
   "/:id",
-  authorize("super_admin", "hr_admin"),
-  hasRequiredPermission([EmployeesAction.Delete]),
+  authorize("hr_admin", "super_admin"),
   EmployeeController.delete,
 );
 
-router.patch(
+// ── POST /employees/:id/verify ───────────────────────────────────────────────
+router.post(
   "/:id/verify",
-  authorize("super_admin", "hr_admin"),
-  hasRequiredPermission([EmployeesAction.Edit]),
+  authorize("hr_admin", "super_admin"),
   EmployeeController.verifyEmployee,
 );
 
+// ── POST /employees/:id/profile-image ────────────────────────────────────────
 router.post(
   "/:id/profile-image",
-  authorize("super_admin", "hr_admin"),
-  hasRequiredPermission([EmployeesAction.Edit]),
-  uploadImage.single("file"),
+  authorize("hr_admin", "super_admin", "employee"),
+  upload.single("file"),
   EmployeeController.uploadProfileImage,
+);
+
+// ── POST /employees/:id/offboarding ──────────────────────────────────────────
+router.post(
+  "/:id/offboarding",
+  authorize("hr_admin", "super_admin"),
+  EmployeeController.startOffboarding,
 );
 
 export default router;

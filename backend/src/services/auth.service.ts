@@ -21,12 +21,37 @@ export class AuthService {
       },
     });
 
-    const token = await this.generateToken(user);
+    const employee = await prisma.employee.findUnique({
+      where: { user_id: user.id },
+      select: { id: true },
+    });
+
+    const token = this.generateToken(user, undefined, employee?.id);
 
     return {
       user: this.sanitizeUser(user),
       token,
     };
+  }
+
+  static async switchRole(
+    userId: string,
+    requestedRole: string,
+  ): Promise<string> {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new Error("User not found");
+
+    const roles = Array.isArray(user.role) ? user.role : [user.role];
+    if (!roles.includes(requestedRole as UserRole)) {
+      throw new Error("Role not assigned to this user");
+    }
+
+    const employee = await prisma.employee.findUnique({
+      where: { user_id: userId },
+      select: { id: true },
+    });
+
+    return this.generateToken(user, requestedRole as UserRole, employee?.id);
   }
 
   static async login(email: string, password: string) {
@@ -42,7 +67,12 @@ export class AuthService {
     if (!isValidPassword) throw new Error("Invalid credentials");
     if (!user.is_active) throw new Error("User account is inactive");
 
-    const token = await this.generateToken(user);
+    const employee = await prisma.employee.findUnique({
+      where: { user_id: user.id },
+      select: { id: true },
+    });
+
+    const token = this.generateToken(user, undefined, employee?.id);
 
     return {
       user: this.sanitizeUser(user),
@@ -50,13 +80,18 @@ export class AuthService {
     };
   }
 
-  static generateToken(user: any, activeRole?: string): string {
+  static generateToken(
+    user: any,
+    activeRole?: string,
+    employeeId?: string,
+  ): string {
     const roles = Array.isArray(user.role) ? user.role : [user.role];
     const payload: JwtPayload = {
       userId: user.id,
       email: user.email,
       role: roles,
       activeRole: (activeRole ?? roles[0]) as UserRole,
+      employeeId: employeeId,
     };
 
     const secret =

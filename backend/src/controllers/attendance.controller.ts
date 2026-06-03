@@ -718,6 +718,83 @@ export class AttendanceController {
     }
   }
 
+  // ── POST /attendance/sync ────────────────────────────────────────────
+  static async sync(req: Request, res: Response<ApiResponse>) {
+    try {
+      const employee_id = req.user?.employeeId;
+      const activeRole = req.user?.activeRole;
+
+      // Employees can only sync their own attendance
+      // Admins can sync all or a specific employee
+      const targetEmployeeId =
+        activeRole === "employee"
+          ? employee_id
+          : (req.body.employee_id ?? employee_id);
+
+      if (!targetEmployeeId) {
+        return res.status(400).json({
+          success: false,
+          message: "No employee target for sync",
+        });
+      }
+
+      const employee = await prisma.employee.findUnique({
+        where: { id: targetEmployeeId },
+      });
+
+      if (!employee) {
+        return res
+          .status(404)
+          .json({ success: false, message: "Employee not found" });
+      }
+
+      // Pull attendance for current month
+      const now = new Date();
+      const startOfMonth = new Date(
+        Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
+      );
+      const endOfMonth = new Date(
+        Date.UTC(
+          now.getUTCFullYear(),
+          now.getUTCMonth() + 1,
+          0,
+          23,
+          59,
+          59,
+          999,
+        ),
+      );
+
+      const records = await prisma.attendance.findMany({
+        where: {
+          employee_id: targetEmployeeId,
+          date: { gte: startOfMonth, lte: endOfMonth },
+        },
+        orderBy: { date: "asc" },
+        include: fullAttendanceInclude,
+      });
+
+      const summary = records.reduce(
+        (acc, r) => {
+          acc[r.status] = (acc[r.status] || 0) + 1;
+          return acc;
+        },
+        {} as Record<string, number>,
+      );
+
+      res.json({
+        success: true,
+        message: "Attendance synced successfully",
+        data: records,
+        summary,
+        total: records.length,
+        synced_at: new Date().toISOString(),
+      } as any);
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  }
+
   // ── POST /attendance/check-out ───────────────────────────────────────
   static async checkOut(req: Request, res: Response<ApiResponse>) {
     try {

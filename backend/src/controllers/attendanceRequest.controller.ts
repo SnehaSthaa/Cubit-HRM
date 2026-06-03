@@ -3,16 +3,10 @@ import {
   AttendanceStatus,
   AttendanceRequestType,
   AttendanceRequestStatus,
+  UserRole,
 } from "@prisma/client";
 import { prisma } from "../db/prisma.js";
 import { ApiResponse } from "../types/index.js";
-
-// ── Constants ────────────────────────────────────────────────────────────────
-
-// Nepal is UTC+5:45
-const NEPAL_OFFSET_MS = (5 * 60 + 45) * 60 * 1000;
-
-// ── Shared includes ──────────────────────────────────────────────────────────
 
 const employeeInclude = {
   personal_details: {
@@ -32,8 +26,40 @@ const fullRequestInclude = {
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
- * Converts an "HH:MM" or "HH:MM:SS" Nepal local time string into a
- * fake-UTC Date for DB storage, consistent with the attendance controller.
+ * Returns true if the given role array includes the target role string.
+ */
+const hasRole = (role: UserRole[] | undefined, target: UserRole): boolean =>
+  role?.includes(target) ?? false;
+
+/**
+ * Parses a "YYYY-MM-DD" string into a UTC midnight Date so Prisma stores
+ * it correctly in a @db.Date column without any timezone shift.
+ * Returns null for empty / invalid input.
+ */
+function parseDateString(dateStr: string | null | undefined): Date | null {
+  if (!dateStr?.trim()) return null;
+
+  const match = dateStr.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+
+  const [, year, month, day] = match.map(Number);
+  const d = new Date(Date.UTC(year, month - 1, day));
+
+  // Sanity check: make sure the date is valid
+  if (isNaN(d.getTime())) return null;
+
+  return d;
+}
+
+/**
+ * Converts an "HH:MM" or "HH:MM:SS" time string into a Timestamptz Date
+ * by combining it with the UTC-midnight dateContext.
+ *
+ * Since the schema stores check_in/check_out as @db.Timestamptz and the
+ * rest of the system treats Nepal local time as fake-UTC, we simply add
+ * the hour/minute/second offsets to the UTC-midnight base so the stored
+ * timestamp reflects Nepal local clock time.
+ *
  * Returns null for empty / invalid input.
  */
 function parseTimeString(
@@ -44,12 +70,15 @@ function parseTimeString(
 
   const trimmed = hhmm.trim();
   const normalized = trimmed.length === 5 ? `${trimmed}:00` : trimmed;
-  const [h, m, s] = normalized.split(":").map(Number);
+  const parts = normalized.split(":").map(Number);
+  const [h, m, s] = parts;
 
-  if (isNaN(h) || isNaN(m)) return null;
+  if (isNaN(h) || isNaN(m) || h > 23 || m > 59) return null;
+  const sec = isNaN(s) ? 0 : s;
+  if (sec > 59) return null;
 
   return new Date(
-    dateContext.getTime() + h * 3_600_000 + m * 60_000 + (s ?? 0) * 1_000,
+    dateContext.getTime() + h * 3_600_000 + m * 60_000 + sec * 1_000,
   );
 }
 
@@ -108,6 +137,14 @@ export class AttendanceRequestController {
         });
       }
 
+      // ── Validate date format ───────────────────────────────────────
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        return res.status(400).json({
+          success: false,
+          message: "date must be in YYYY-MM-DD format",
+        });
+      }
+
       if (!["check_in", "check_out", "both"].includes(request_type)) {
         return res.status(400).json({
           success: false,
@@ -146,7 +183,14 @@ export class AttendanceRequestController {
           .json({ success: false, message: "Employee not found" });
       }
 
-      const dateContext = new Date(date);
+      // ── Parse date safely using UTC to avoid timezone shifts ───────
+      const dateContext = parseDateString(date);
+      if (!dateContext) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid date value provided",
+        });
+      }
 
       // ── Block duplicate pending request for same day ───────────────
       const duplicate = await prisma.attendanceRequest.findFirst({
@@ -163,6 +207,28 @@ export class AttendanceRequestController {
       const checkInTime = parseTimeString(requested_check_in, dateContext);
       const checkOutTime = parseTimeString(requested_check_out, dateContext);
 
+      if (
+        request_type === "check_in" &&
+        requested_check_in?.trim() &&
+        !checkInTime
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "requested_check_in must be in HH:MM or HH:MM:SS format",
+        });
+      }
+
+      if (
+        (request_type === "check_out" || request_type === "both") &&
+        requested_check_out?.trim() &&
+        !checkOutTime
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "requested_check_out must be in HH:MM or HH:MM:SS format",
+        });
+      }
+
       if (checkInTime && checkOutTime && checkOutTime <= checkInTime) {
         return res.status(400).json({
           success: false,
@@ -176,8 +242,8 @@ export class AttendanceRequestController {
           employee_id,
           date: dateContext,
           request_type: request_type as AttendanceRequestType,
-          requested_check_in: checkInTime,
-          requested_check_out: checkOutTime,
+          requested_check_in: checkInTime ?? null,
+          requested_check_out: checkOutTime ?? null,
           requested_status: requested_status
             ? (requested_status as AttendanceStatus)
             : null,
@@ -192,6 +258,7 @@ export class AttendanceRequestController {
         data: request,
       });
     } catch (error: any) {
+      console.error("[AttendanceRequest.create]", error);
       res.status(500).json({ success: false, message: error.message });
     }
   }
@@ -243,6 +310,7 @@ export class AttendanceRequestController {
         },
       } as any);
     } catch (error: any) {
+      console.error("[AttendanceRequest.getMyRequests]", error);
       res.status(500).json({ success: false, message: error.message });
     }
   }
@@ -268,8 +336,15 @@ export class AttendanceRequestController {
         where.request_type = request_type as AttendanceRequestType;
       if (from_date || to_date) {
         where.date = {};
-        if (from_date) where.date.gte = new Date(from_date);
-        if (to_date) where.date.lte = new Date(to_date);
+        // Use parseDateString to avoid timezone shift on filter dates too
+        if (from_date) {
+          const parsed = parseDateString(from_date);
+          if (parsed) where.date.gte = parsed;
+        }
+        if (to_date) {
+          const parsed = parseDateString(to_date);
+          if (parsed) where.date.lte = parsed;
+        }
       }
 
       const skip = (parseInt(page) - 1) * parseInt(limit);
@@ -298,6 +373,7 @@ export class AttendanceRequestController {
         },
       } as any);
     } catch (error: any) {
+      console.error("[AttendanceRequest.getAll]", error);
       res.status(500).json({ success: false, message: error.message });
     }
   }
@@ -323,8 +399,9 @@ export class AttendanceRequestController {
       // Employees can only view their own requests
       const employee_id = req.user?.employeeId;
       const role = req.user?.role;
+
       if (
-        role === "employee" &&
+        hasRole(role, UserRole.employee) &&
         employee_id &&
         request.employee_id !== employee_id
       ) {
@@ -340,6 +417,7 @@ export class AttendanceRequestController {
         data: request,
       });
     } catch (error: any) {
+      console.error("[AttendanceRequest.getById]", error);
       res.status(500).json({ success: false, message: error.message });
     }
   }
@@ -370,7 +448,8 @@ export class AttendanceRequestController {
         });
       }
 
-      const dateContext = request.date; // already fake-UTC Nepal midnight
+      // request.date is already a proper UTC-midnight Date from DB
+      const dateContext = request.date;
 
       // ── Build attendance update payload ────────────────────────────
       const attendanceData: any = {};
@@ -400,7 +479,6 @@ export class AttendanceRequestController {
       // ── Apply to attendance + mark request approved in a transaction
       const [updatedRequest, updatedAttendance] = await prisma.$transaction(
         async (tx) => {
-          // Check if an attendance record exists for this employee + date
           const existingAttendance = await tx.attendance.findUnique({
             where: {
               employee_id_date: {
@@ -413,13 +491,11 @@ export class AttendanceRequestController {
           let attendance;
 
           if (existingAttendance) {
-            // Update existing attendance record
             attendance = await tx.attendance.update({
               where: { id: existingAttendance.id },
               data: attendanceData,
             });
           } else {
-            // No record for that day — create one
             const deviceSerial = await ensureManualDevice();
             attendance = await tx.attendance.create({
               data: {
@@ -435,7 +511,6 @@ export class AttendanceRequestController {
             });
           }
 
-          // Mark request as approved
           const approvedRequest = await tx.attendanceRequest.update({
             where: { id },
             data: {
@@ -460,12 +535,12 @@ export class AttendanceRequestController {
         },
       } as any);
     } catch (error: any) {
+      console.error("[AttendanceRequest.approve]", error);
       res.status(500).json({ success: false, message: error.message });
     }
   }
 
   // ── PATCH /attendance/requests/:id/reject ────────────────────────────
-  // HR/admin rejects — attendance record is NOT touched
   static async reject(req: Request, res: Response<ApiResponse>) {
     try {
       const { id } = req.params;
@@ -507,12 +582,12 @@ export class AttendanceRequestController {
         data: updated,
       });
     } catch (error: any) {
+      console.error("[AttendanceRequest.reject]", error);
       res.status(500).json({ success: false, message: error.message });
     }
   }
 
-  // ── DELETE /attendance/requests/:id ─────────────────────────────────
-  // Employee can delete their own pending request; HR can delete any
+  // ── DELETE /attendance/requests/:id ──────────────────────────────────
   static async delete(req: Request, res: Response<ApiResponse>) {
     try {
       const { id } = req.params;
@@ -530,7 +605,7 @@ export class AttendanceRequestController {
         });
       }
 
-      if (role === "employee") {
+      if (hasRole(role, UserRole.employee)) {
         if (request.employee_id !== employee_id) {
           return res.status(403).json({
             success: false,
@@ -552,6 +627,7 @@ export class AttendanceRequestController {
         message: "Attendance request deleted",
       });
     } catch (error: any) {
+      console.error("[AttendanceRequest.delete]", error);
       res.status(500).json({ success: false, message: error.message });
     }
   }

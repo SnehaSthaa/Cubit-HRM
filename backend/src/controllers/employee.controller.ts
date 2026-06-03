@@ -9,7 +9,6 @@ import { minioClient, MINIO_BASE_URL, ensureBucket } from "@/utils/minio.js";
 
 const EMPLOYEE_FILES_BUCKET = "employee-files";
 
-// Valid values from the MunicipalityType enum in schema.prisma
 const VALID_MUNICIPALITY_TYPES = [
   "metropolitian",
   "sub_metropolitian",
@@ -259,8 +258,7 @@ export class EmployeeController {
               ...(body.employment_status && {
                 employment_status: body.employment_status,
               }),
-              // FIX: schema field is `position`, not `designation`
-              ...(body.position && { position: body.position }),
+              ...(body.designation && { designation: body.designation }), // ✅ fixed: was body.position
               ...(body.level && { level: body.level }),
             },
           },
@@ -291,8 +289,7 @@ export class EmployeeController {
         name: `${body.first_name} ${body.last_name}`,
         employeeId: employee.employee_id,
         department: body.department_name,
-        // FIX: schema field is `position`, not `designation`
-        position: body.position ?? "",
+        position: body.designation ?? "", // ✅ fixed: was body.position
         email: body.email,
         password: randomPassword,
       });
@@ -465,8 +462,7 @@ export class EmployeeController {
           "previous_experience",
           "employment_type",
           "employment_status",
-          // FIX: schema field is `position`, not `designation`
-          "position",
+          "designation", // ✅ fixed: was "position"
           "level",
         ]) {
           if (dept[field] !== undefined) {
@@ -699,6 +695,7 @@ export class EmployeeController {
     }
   }
 
+  // ── POST /employees/:id/offboarding ─────────────────────────────────────
   static async startOffboarding(req: Request, res: Response<ApiResponse>) {
     try {
       const { id } = req.params;

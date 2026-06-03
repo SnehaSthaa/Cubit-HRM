@@ -11,6 +11,7 @@ import {
   RolesandAccessAction,
   EmployeeSelfServiceAction,
   DeviceAction,
+  ProfileRequestAction,
 } from "./permission";
 
 const super_admin: AllowedType = {
@@ -31,6 +32,7 @@ const super_admin: AllowedType = {
     [AttendanceAction.Create]: true,
     [AttendanceAction.Edit]: true,
     [AttendanceAction.Delete]: true,
+    [AttendanceAction.Sync]: true,
   },
   leave_management: {
     [LeaveManagementAction.View]: true,
@@ -81,6 +83,13 @@ const super_admin: AllowedType = {
     [DeviceAction.Delete]: true,
     [DeviceAction.Sync]: true,
   },
+  profile_requests: {
+    [ProfileRequestAction.View]: true,
+    [ProfileRequestAction.Create]: true,
+    [ProfileRequestAction.Edit]: true,
+    [ProfileRequestAction.Delete]: true,
+    [ProfileRequestAction.Review]: true,
+  },
 };
 
 const hr_admin: AllowedType = {
@@ -101,6 +110,7 @@ const hr_admin: AllowedType = {
     [AttendanceAction.Create]: true,
     [AttendanceAction.Edit]: true,
     [AttendanceAction.Delete]: false,
+    [AttendanceAction.Sync]: true,
   },
   leave_management: {
     [LeaveManagementAction.View]: true,
@@ -151,6 +161,13 @@ const hr_admin: AllowedType = {
     [DeviceAction.Delete]: true,
     [DeviceAction.Sync]: true,
   },
+  profile_requests: {
+    [ProfileRequestAction.View]: true,
+    [ProfileRequestAction.Create]: false,
+    [ProfileRequestAction.Edit]: true,
+    [ProfileRequestAction.Delete]: false,
+    [ProfileRequestAction.Review]: true,
+  },
 };
 
 const employee: AllowedType = {
@@ -163,7 +180,7 @@ const employee: AllowedType = {
   employee: {
     [EmployeesAction.View]: true,
     [EmployeesAction.Create]: false,
-    [EmployeesAction.Edit]: false,
+    [EmployeesAction.Edit]: true,
     [EmployeesAction.Delete]: false,
   },
   attendance: {
@@ -171,6 +188,7 @@ const employee: AllowedType = {
     [AttendanceAction.Create]: true,
     [AttendanceAction.Edit]: true,
     [AttendanceAction.Delete]: false,
+    [AttendanceAction.Sync]: true,
   },
   leave_management: {
     [LeaveManagementAction.View]: true,
@@ -219,7 +237,14 @@ const employee: AllowedType = {
     [DeviceAction.Create]: false,
     [DeviceAction.Update]: false,
     [DeviceAction.Delete]: false,
-    [DeviceAction.Sync]: false,
+    [DeviceAction.Sync]: true,
+  },
+  profile_requests: {
+    [ProfileRequestAction.View]: true,
+    [ProfileRequestAction.Create]: true,
+    [ProfileRequestAction.Edit]: false,
+    [ProfileRequestAction.Delete]: false,
+    [ProfileRequestAction.Review]: false,
   },
 };
 

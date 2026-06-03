@@ -17,6 +17,7 @@ export const AttendanceAction = {
   Create: "attendance.create",
   Edit: "attendance.edit",
   Delete: "attendance.delete",
+  Sync: "attendance.sync",
 } as const;
 
 export const LeaveManagementAction = {
@@ -81,6 +82,14 @@ export const DeviceAction = {
   Sync: "device.sync",
 } as const;
 
+export const ProfileRequestAction = {
+  View: "profilerequest.view",
+  Create: "profilerequest.create",
+  Edit: "profilerequest.edit",
+  Delete: "profilerequest.delete",
+  Review: "profilerequest.review",
+} as const;
+
 export type AllowedType = {
   dashboard: {
     [K in (typeof DashboardAction)[keyof typeof DashboardAction]]: boolean;
@@ -114,5 +123,8 @@ export type AllowedType = {
   };
   device: {
     [K in (typeof DeviceAction)[keyof typeof DeviceAction]]: boolean;
+  };
+  profile_requests: {
+    [K in (typeof ProfileRequestAction)[keyof typeof ProfileRequestAction]]: boolean;
   };
 };

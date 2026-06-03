@@ -259,12 +259,10 @@ function getEmployeeName(record: AttendanceRecord): string {
   return record.employee_id;
 }
 
-// ── Reads department from AttendanceRecord (Department[] from schema) ──
 function getDepartment(record: AttendanceRecord): string {
   return record.employee?.department?.[0]?.department_name ?? "—";
 }
 
-// ── Reads department from ApiMapping's employee field (same Department[] shape) ──
 function getMappingDepartment(emp: ApiMapping["employee"]): string {
   return emp?.department?.[0]?.department_name ?? "—";
 }
@@ -453,7 +451,9 @@ export default function Attendance() {
       .catch(() => {});
   }, []);
 
+  // ── HR-only: fetch devices ──
   const fetchDevices = useCallback(async () => {
+    if (!isHR) return;
     setDevicesLoading(true);
     try {
       const res = await fetch(`${API_BASE}/devices`, { headers: authHeaders() });
@@ -465,9 +465,11 @@ export default function Attendance() {
     } finally {
       setDevicesLoading(false);
     }
-  }, [toast]);
+  }, [isHR, toast]);
 
+  // ── HR-only: fetch mappings ──
   const fetchMappings = useCallback(async () => {
+    if (!isHR) return;
     setMappingsLoading(true);
     try {
       const res = await fetch(`${API_BASE}/devices/mappings/all`, { headers: authHeaders() });
@@ -479,9 +481,11 @@ export default function Attendance() {
     } finally {
       setMappingsLoading(false);
     }
-  }, [toast]);
+  }, [isHR, toast]);
 
+  // ── HR-only: fetch unmapped employees ──
   const fetchUnmappedEmployees = useCallback(async () => {
+    if (!isHR) return;
     setUnmappedLoading(true);
     try {
       const res = await fetch(`${API_BASE}/employees?device_mapping=null`, { headers: authHeaders() });
@@ -502,7 +506,7 @@ export default function Attendance() {
     } finally {
       setUnmappedLoading(false);
     }
-  }, [toast]);
+  }, [isHR, toast]);
 
   const fetchMyAttendance = useCallback(async () => {
     if (!myEmployeeId) return;
@@ -596,10 +600,13 @@ export default function Attendance() {
   const fetchMonthlySummary = useCallback(async () => {
     setLoading(true);
     try {
-      const month    = parseInt(selectedMonth);
-      const year     = parseInt(selectedYear);
-      const fromDate = new Date(year, month, 1).toISOString().split("T")[0];
-      const toDate   = new Date(year, month + 1, 0).toISOString().split("T")[0];
+      const month = parseInt(selectedMonth);
+      const year  = parseInt(selectedYear);
+
+      const monthStr   = String(month + 1).padStart(2, "0");
+      const fromDate   = `${year}-${monthStr}-01`;
+      const lastDay    = new Date(year, month + 1, 0).getDate();
+      const toDate     = `${year}-${monthStr}-${String(lastDay).padStart(2, "0")}`;
 
       const employeeFilter = !isHR && myEmployeeId
         ? `&employee_id=${myEmployeeId}`
@@ -629,12 +636,15 @@ export default function Attendance() {
     localStorage.setItem("attendance_audit_log", JSON.stringify(auditLog));
   }, [auditLog]);
 
+  // ── FIXED: Only call device/mapping APIs for HR ──
   useEffect(() => {
     if (!isHR && !myEmployeeId) return;
     fetchDailyLog();
-    fetchDevices();
-    fetchMappings();
-    fetchUnmappedEmployees();
+    if (isHR) {
+      fetchDevices();
+      fetchMappings();
+      fetchUnmappedEmployees();
+    }
   }, [fetchDailyLog, fetchDevices, fetchMappings, fetchUnmappedEmployees, isHR, myEmployeeId]);
 
   useEffect(() => {
@@ -659,9 +669,8 @@ export default function Attendance() {
       await Promise.all([
         fetchDailyLog(),
         fetchMyAttendance(),
-        fetchDevices(),
-        fetchMappings(),
-        fetchUnmappedEmployees(),
+        // Only refresh device data for HR
+        ...(isHR ? [fetchDevices(), fetchMappings(), fetchUnmappedEmployees()] : []),
       ]);
     } catch (err: unknown) {
       toast({ title: "Sync failed", description: (err as Error).message, variant: "destructive" });
@@ -672,7 +681,7 @@ export default function Attendance() {
 
   const handleAddDevice = async () => {
     if (!newDevice.name || !newDevice.ip || !newDevice.serial_number) {
-      toast({ title: "Missing fields", description: "Device name, and IP are required.", variant: "destructive" });
+      toast({ title: "Missing fields", description: "Device name, serial number, and IP are required.", variant: "destructive" });
       return;
     }
     try {
@@ -845,21 +854,34 @@ export default function Attendance() {
 
     setCorrectionSubmitting(true);
     try {
-      const currentUser = getCurrentUser();
-      const empName = currentUser?.name ?? "Unknown";
-      const empId   = myEmployeeId ?? currentUser?.id ?? "unknown";
+      const res = await fetch(`${API_BASE}/attendance/requests`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          date:                correctionForm.date,
+          request_type:        correctionForm.type,
+          requested_check_in:  correctionForm.type !== "check_out" ? correctionForm.checkIn  : undefined,
+          requested_check_out: correctionForm.type !== "check_in"  ? correctionForm.checkOut : undefined,
+          reason:              correctionForm.reason.trim(),
+        }),
+      });
 
+      if (!res.ok) { const msg = await extractError(res); throw new Error(msg); }
+      const json = await res.json();
+      if (!json.success) throw new Error(json.message ?? "Submission failed");
+
+      const currentUser = getCurrentUser();
       const newRequest: CorrectionRequest = {
-        id:                `corr-${Date.now()}`,
-        employeeId:        empId,
-        employeeName:      empName,
+        id:                json.data.id,
+        employeeId:        myEmployeeId ?? currentUser?.id ?? "unknown",
+        employeeName:      currentUser?.name ?? "Unknown",
         date:              correctionForm.date,
         type:              correctionForm.type,
         requestedCheckIn:  correctionForm.type !== "check_out" ? correctionForm.checkIn  : null,
         requestedCheckOut: correctionForm.type !== "check_in"  ? correctionForm.checkOut : null,
-        reason:            correctionForm.reason,
+        reason:            correctionForm.reason.trim(),
         status:            "pending",
-        submittedAt:       new Date().toISOString(),
+        submittedAt:       json.data.created_at ?? new Date().toISOString(),
         actionBy:          null,
       };
 
@@ -870,6 +892,8 @@ export default function Attendance() {
       toast({ title: "Request submitted", description: "HR will review your correction request." });
       setCorrectionDialog(false);
       setCorrectionForm({ date: getTodayStr(), type: "check_in", checkIn: "", checkOut: "", reason: "" });
+    } catch (err: unknown) {
+      toast({ title: "Submission failed", description: (err as Error).message, variant: "destructive" });
     } finally {
       setCorrectionSubmitting(false);
     }
@@ -1083,9 +1107,18 @@ export default function Attendance() {
     rejected: "status-resigned",
   };
 
+  // ── HR-only: Device Config dialog content ──
   const deviceConfigContent = (
     <div className="space-y-4 pt-2">
-      
+      <div className="bg-muted/30 border border-border rounded-lg p-4">
+        <h4 className="text-sm font-semibold mb-1">ADMS Server URL</h4>
+        <p className="text-xs text-muted-foreground mb-2">
+          Set this URL on your ZKTeco device under Communication → Cloud Server.
+        </p>
+        <code className="text-xs bg-muted px-2 py-1 rounded font-mono-data">
+          {window.location.origin}/adms
+        </code>
+      </div>
 
       <div>
         <div className="flex items-center justify-between mb-2">
@@ -1103,7 +1136,13 @@ export default function Attendance() {
                   <label className="text-xs text-muted-foreground mb-1 block">Device Name</label>
                   <Input value={newDevice.name} onChange={(e) => setNewDevice({ ...newDevice, name: e.target.value })} placeholder="e.g., Floor 2 Entrance" className="h-8 text-sm" />
                 </div>
-                
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">
+                    Serial Number <span className="text-destructive">*</span>
+                    <span className="ml-1 text-muted-foreground">(printed on back of device)</span>
+                  </label>
+                  <Input value={newDevice.serial_number} onChange={(e) => setNewDevice({ ...newDevice, serial_number: e.target.value })} placeholder="e.g., ABC1234567" className="h-8 text-sm font-mono-data" />
+                </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs text-muted-foreground mb-1 block">IP Address</label>
@@ -1225,6 +1264,7 @@ export default function Attendance() {
                 <DialogHeader>
                   <DialogTitle>ZKTeco Device Configuration</DialogTitle>
                   <DialogDescription>
+                    Manage ZKTeco K40 biometric devices. The device auto-registers on first punch using the serial number.
                   </DialogDescription>
                 </DialogHeader>
                 {deviceConfigContent}
@@ -1240,7 +1280,13 @@ export default function Attendance() {
           <TabsList>
             <TabsTrigger value="daily"   className="gap-1.5"><CalendarIcon className="w-3.5 h-3.5" /> Daily Log</TabsTrigger>
             <TabsTrigger value="monthly" className="gap-1.5"><TrendingUp   className="w-3.5 h-3.5" /> Monthly Report</TabsTrigger>
-            <TabsTrigger value="devices" className="gap-1.5"><Wifi         className="w-3.5 h-3.5" /> Devices</TabsTrigger>
+
+            {/* ── FIXED: Devices tab — HR only ── */}
+            {isHR && (
+              <TabsTrigger value="devices" className="gap-1.5"><Wifi className="w-3.5 h-3.5" /> Devices</TabsTrigger>
+            )}
+
+            {/* ── FIXED: Mapping tab — HR only ── */}
             {isHR && (
               <TabsTrigger value="mapping" className="gap-1.5">
                 <Fingerprint className="w-3.5 h-3.5" /> User Mapping
@@ -1251,6 +1297,8 @@ export default function Attendance() {
                 )}
               </TabsTrigger>
             )}
+
+            {/* ── My Requests tab — Employee only ── */}
             {!isHR && (
               <TabsTrigger value="my_requests" className="gap-1.5">
                 <Inbox className="w-3.5 h-3.5" /> My Requests
@@ -1510,66 +1558,66 @@ export default function Attendance() {
             </div>
           </TabsContent>
 
-          {/* ══ DEVICES TAB ══ */}
-          <TabsContent value="devices" className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-semibold">Biometric Devices</h2>
-              {isHR && (
+          {/* ══ DEVICES TAB — HR only ══ */}
+          {isHR && (
+            <TabsContent value="devices" className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-semibold">Biometric Devices</h2>
                 <Button variant="outline" size="sm" className="gap-1 h-7 text-xs press-effect" onClick={() => setConfigDialog(true)}>
                   <Settings2 className="w-3 h-3" /> Manage Devices
                 </Button>
+              </div>
+              {devicesLoading ? (
+                <div className="flex items-center justify-center py-16 text-sm text-muted-foreground gap-2">
+                  <RefreshCw className="w-4 h-4 animate-spin" /> Loading devices...
+                </div>
+              ) : devices.length === 0 ? (
+                <div className="text-center text-sm text-muted-foreground py-16">
+                  No devices registered. Add one via Manage Devices.
+                </div>
+              ) : (
+                <div className="grid grid-cols-3 gap-4">
+                  {devices.map((device) => (
+                    <div key={device.id} className="glass-card p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          {device.status === "online" ? <Wifi className="w-4 h-4 text-success" /> : <WifiOff className="w-4 h-4 text-destructive" />}
+                          <span className="text-sm font-medium">{device.device_name}</span>
+                        </div>
+                        <span className={`status-pill ${device.status === "online" ? "status-active" : "status-resigned"}`}>
+                          {device.status}
+                        </span>
+                      </div>
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between text-xs">
+                          <span className="text-muted-foreground">Serial</span>
+                          <span className="font-mono-data text-[11px]">{device.serial_number}</span>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                          <span className="text-muted-foreground">Model</span>
+                          <span className="font-mono-data text-[11px]">{device.device_model}</span>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                          <span className="text-muted-foreground">IP Address</span>
+                          <span className="font-mono-data text-[11px]">{device.ip}:4370</span>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                          <span className="text-muted-foreground">Last Sync</span>
+                          <span className="font-mono-data text-[11px]">{formatLastSync(device.updated_at)}</span>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                          <span className="text-muted-foreground">Mapped Users</span>
+                          <span className="font-mono-data text-[11px] text-primary font-semibold">{device.mappings?.length ?? 0}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               )}
-            </div>
-            {devicesLoading ? (
-              <div className="flex items-center justify-center py-16 text-sm text-muted-foreground gap-2">
-                <RefreshCw className="w-4 h-4 animate-spin" /> Loading devices...
-              </div>
-            ) : devices.length === 0 ? (
-              <div className="text-center text-sm text-muted-foreground py-16">
-                No devices registered. {isHR && "Add one via Manage Devices."}
-              </div>
-            ) : (
-              <div className="grid grid-cols-3 gap-4">
-                {devices.map((device) => (
-                  <div key={device.id} className="glass-card p-4">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-2">
-                        {device.status === "online" ? <Wifi className="w-4 h-4 text-success" /> : <WifiOff className="w-4 h-4 text-destructive" />}
-                        <span className="text-sm font-medium">{device.device_name}</span>
-                      </div>
-                      <span className={`status-pill ${device.status === "online" ? "status-active" : "status-resigned"}`}>
-                        {device.status}
-                      </span>
-                    </div>
-                    <div className="space-y-1.5">
-                      <div className="flex justify-between text-xs">
-                        <span className="text-muted-foreground">Serial</span>
-                        <span className="font-mono-data text-[11px]">{device.serial_number}</span>
-                      </div>
-                      <div className="flex justify-between text-xs">
-                        <span className="text-muted-foreground">Model</span>
-                        <span className="font-mono-data text-[11px]">{device.device_model}</span>
-                      </div>
-                      <div className="flex justify-between text-xs">
-                        <span className="text-muted-foreground">IP Address</span>
-                        <span className="font-mono-data text-[11px]">{device.ip}:4370</span>
-                      </div>
-                      <div className="flex justify-between text-xs">
-                        <span className="text-muted-foreground">Last Sync</span>
-                        <span className="font-mono-data text-[11px]">{formatLastSync(device.updated_at)}</span>
-                      </div>
-                      <div className="flex justify-between text-xs">
-                        <span className="text-muted-foreground">Mapped Users</span>
-                        <span className="font-mono-data text-[11px] text-primary font-semibold">{device.mappings?.length ?? 0}</span>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </TabsContent>
+            </TabsContent>
+          )}
 
-          {/* ══ USER MAPPING TAB (HR only) ══ */}
+          {/* ══ USER MAPPING TAB — HR only ══ */}
           {isHR && (
             <TabsContent value="mapping">
               <div className="flex gap-5 items-start">
@@ -1727,7 +1775,7 @@ export default function Attendance() {
             </TabsContent>
           )}
 
-          {/* ══ MY REQUESTS TAB (Employee only) ══ */}
+          {/* ══ MY REQUESTS TAB — Employee only ══ */}
           {!isHR && (
             <TabsContent value="my_requests" className="space-y-4">
               <div className="flex items-center justify-between">
@@ -1806,7 +1854,12 @@ export default function Attendance() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs text-muted-foreground mb-1.5 block">Date</label>
-                <Input type="date" value={correctionForm.date} onChange={(e) => setCorrectionForm((f) => ({ ...f, date: e.target.value }))} className="h-9 text-sm font-mono-data" />
+                <Input
+                  type="date"
+                  value={correctionForm.date}
+                  onChange={(e) => setCorrectionForm((f) => ({ ...f, date: e.target.value }))}
+                  className="h-9 text-sm font-mono-data"
+                />
               </div>
               <div>
                 <label className="text-xs text-muted-foreground mb-1.5 block">Request Type</label>
@@ -1826,17 +1879,29 @@ export default function Attendance() {
             {correctionForm.type !== "check_out" && (
               <div>
                 <label className="text-xs text-muted-foreground mb-1.5 block">Check-in time</label>
-                <Input type="time" value={correctionForm.checkIn} onChange={(e) => setCorrectionForm((f) => ({ ...f, checkIn: e.target.value }))} className="h-9 font-mono-data" />
+                <Input
+                  type="time"
+                  value={correctionForm.checkIn}
+                  onChange={(e) => setCorrectionForm((f) => ({ ...f, checkIn: e.target.value }))}
+                  className="h-9 font-mono-data"
+                />
               </div>
             )}
             {correctionForm.type !== "check_in" && (
               <div>
                 <label className="text-xs text-muted-foreground mb-1.5 block">Check-out time</label>
-                <Input type="time" value={correctionForm.checkOut} onChange={(e) => setCorrectionForm((f) => ({ ...f, checkOut: e.target.value }))} className="h-9 font-mono-data" />
+                <Input
+                  type="time"
+                  value={correctionForm.checkOut}
+                  onChange={(e) => setCorrectionForm((f) => ({ ...f, checkOut: e.target.value }))}
+                  className="h-9 font-mono-data"
+                />
               </div>
             )}
             <div>
-              <label className="text-xs text-muted-foreground mb-1.5 block">Reason <span className="text-destructive">*</span></label>
+              <label className="text-xs text-muted-foreground mb-1.5 block">
+                Reason <span className="text-destructive">*</span>
+              </label>
               <textarea
                 value={correctionForm.reason}
                 onChange={(e) => setCorrectionForm((f) => ({ ...f, reason: e.target.value }))}

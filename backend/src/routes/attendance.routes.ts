@@ -7,6 +7,14 @@ const router = Router();
 
 router.use(authenticate);
 
+// ── DEBUG (remove after fixing) ───────────────────────────────────────────────
+router.get("/debug-token", (req, res) => {
+  res.json({
+    user: req.user,
+    hasEmployeeId: !!req.user?.employeeId,
+  });
+});
+
 router.get(
   "/summary",
   hasRequiredPermission([AttendanceAction.View]),
@@ -37,8 +45,6 @@ router.post(
   AttendanceController.bulkCreate,
 );
 
-// ── Parameterized / root routes last ─────────────────────────────────────────
-
 router.get(
   "/",
   hasRequiredPermission([AttendanceAction.View]),
@@ -68,5 +74,9 @@ router.delete(
   hasRequiredPermission([AttendanceAction.Delete]),
   AttendanceController.delete,
 );
-
+router.post(
+  "/sync",
+  hasRequiredPermission([AttendanceAction.Sync]),
+  AttendanceController.sync,
+);
 export default router;

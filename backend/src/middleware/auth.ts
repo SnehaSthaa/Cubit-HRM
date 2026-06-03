@@ -43,15 +43,25 @@ export const authorize = (...roles: UserRole[]) => {
         .json({ success: false, message: "Not authenticated" });
     }
 
+    const activeRole = req.user.activeRole;
+
+    console.log("activeRole: ", activeRole);
     const userRoles = Array.isArray(req.user.role)
       ? req.user.role
       : [req.user.role];
-    const hasRole = userRoles.some((r) => roles.includes(r as UserRole));
+    console.log("userRoles: ", userRoles);
+
+    const rolesToCheck = activeRole ? [activeRole, ...userRoles] : userRoles;
+
+    const hasRole = rolesToCheck.some((r) => roles.includes(r as UserRole));
+    console.log("hasRole: ", hasRole);
 
     if (!hasRole) {
-      return res
-        .status(403)
-        .json({ success: false, message: "Insufficient permissions" });
+      return res.status(403).json({
+        success: false,
+        message: "Insufficient permissions",
+        debug: { activeRole, userRoles, required: roles },
+      });
     }
 
     next();
@@ -61,32 +71,57 @@ export const authorize = (...roles: UserRole[]) => {
 export const hasRequiredPermission = (permissions: string[]) => {
   return (req: Request, res: Response, next: NextFunction) => {
     const user = req.user;
+
     if (!user) {
-      return res.status(401).json({ message: "Unauthorized" });
+      return res.status(401).json({ success: false, message: "Unauthorized" });
     }
-    const activeRole = user.activeRole;
+
+    const activeRole = user.activeRole
+      ? user.activeRole
+      : Array.isArray(user.role)
+        ? user.role[0]
+        : user.role;
+
+    const resolvedRole = (
+      Array.isArray(activeRole) ? activeRole[0] : activeRole
+    ) as string;
+
+    console.log("[PERM CHECK]", {
+      resolvedRole,
+      required: permissions,
+      userPayload: { activeRole: user.activeRole, role: user.role },
+    });
+
     const permsForRole =
-      allPermission[activeRole as keyof typeof allPermission];
+      allPermission[resolvedRole as keyof typeof allPermission];
+
     if (!permsForRole) {
-      return res
-        .status(403)
-        .json({ message: "Forbidden - no permissions found for role" });
+      return res.status(403).json({
+        success: false,
+        message: `Forbidden - no permissions config for role: ${resolvedRole}`,
+      });
     }
-    const flattenedPermissions = Object.values(permsForRole).flatMap(
-      (actions) =>
-        Object.entries(actions as Record<string, boolean>)
-          .filter(([_, hasPerm]) => hasPerm)
-          .map(([action]) => action),
+
+    const allowedPermissions = Object.values(permsForRole).flatMap((actions) =>
+      Object.entries(actions as Record<string, boolean>)
+        .filter(([, hasPerm]) => hasPerm === true)
+        .map(([action]) => action),
     );
 
     const hasPermission = permissions.some((perm) =>
-      flattenedPermissions.includes(perm),
+      allowedPermissions.includes(perm),
     );
 
     if (!hasPermission) {
-      return res
-        .status(403)
-        .json({ success: false, message: "Forbidden-missing permission" });
+      return res.status(403).json({
+        success: false,
+        message: "Forbidden - missing permission",
+        debug: {
+          resolvedRole,
+          required: permissions,
+          allowed: allowedPermissions,
+        },
+      });
     }
 
     next();
