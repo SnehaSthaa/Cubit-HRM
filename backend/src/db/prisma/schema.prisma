@@ -7,34 +7,35 @@ datasource db {
 }
 
 model User {
-  id            String     @id @default(uuid()) @db.Uuid
-  email         String     @unique
-  password_hash String
-  name          String
-  phone         String?
-  role          UserRole[]
-  is_active     Boolean    @default(true)
-  created_at    DateTime   @default(now())
-  updated_at    DateTime   @updatedAt
-  employee      Employee?
-  reports       Report[]
-  assets        Asset[]
+  id                        String                 @id @default(uuid()) @db.Uuid
+  email                     String                 @unique
+  password_hash             String
+  name                      String
+  phone                     String?
+  role                      UserRole[]
+  is_active                 Boolean                @default(true)
+  created_at                DateTime               @default(now())
+  updated_at                DateTime               @updatedAt
+  assets                    Asset[]
+  employee                  Employee?
+  reviewed_profile_requests ProfileUpdateRequest[] @relation("HRProfileReviews")
+  reports                   Report[]
 
   @@map("users")
 }
 
 model Employee {
-  id                   String              @id @default(uuid()) @db.Uuid
-  user_id              String              @unique @db.Uuid
-  employee_id          String              @unique
-  manager_id           String?             @db.Uuid
+  id                   String                 @id @default(uuid()) @db.Uuid
+  user_id              String                 @unique @db.Uuid
+  employee_id          String                 @unique
+  manager_id           String?                @db.Uuid
   notes                String?
-  created_at           DateTime            @default(now())
-  updated_at           DateTime            @updatedAt
-  employee_verified    Boolean             @default(false)
+  created_at           DateTime               @default(now())
+  updated_at           DateTime               @updatedAt
+  employee_verified    Boolean                @default(false)
   profile_image        String?
-  verification_pending Boolean             @default(false)
-  assets               Asset[]             @relation("AssetAssignee")
+  verification_pending Boolean                @default(false)
+  assets               Asset[]                @relation("AssetAssignee")
   attendance           Attendance[]
   attendance_requests  AttendanceRequest[]
   bank_details         BankDetail?
@@ -42,13 +43,14 @@ model Employee {
   deviceMappings       DeviceMapping[]
   emergencyContacts    EmergencyContact[]
   documents            EmployeeDocument[]
-  manager              Employee?           @relation("EmployeeManager", fields: [manager_id], references: [id])
-  subordinates         Employee[]          @relation("EmployeeManager")
-  user                 User                @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  manager              Employee?              @relation("EmployeeManager", fields: [manager_id], references: [id])
+  subordinates         Employee[]             @relation("EmployeeManager")
+  user                 User                   @relation(fields: [user_id], references: [id], onDelete: Cascade)
   leaveBalances        LeaveBalance[]
   leaves               Leave[]
   payroll              Payroll[]
   personal_details     PersonalDetail?
+  profile_requests     ProfileUpdateRequest[] @relation("EmployeeProfileRequests")
 
   @@map("employees")
 }
@@ -62,8 +64,8 @@ model Department {
   previous_experience String?
   employment_type     String?
   employment_status   EmploymentStatus @default(active)
-  designation         String?
   level               String?
+  designation         String?
   employee            Employee         @relation(fields: [employee_id], references: [id], onDelete: Cascade)
 
   @@map("departments")
@@ -142,6 +144,25 @@ model EmployeeDocument {
   @@map("employee_documents")
 }
 
+model ProfileUpdateRequest {
+  id             String         @id @default(uuid()) @db.Uuid
+  employee_id    String         @db.Uuid
+  section        ProfileSection
+  requested_data Json
+  status         RequestStatus  @default(pending)
+  reviewed_by    String?        @db.Uuid
+  reviewed_at    DateTime?
+  reviewer_notes String?
+  created_at     DateTime       @default(now())
+  updated_at     DateTime       @updatedAt
+  employee       Employee       @relation("EmployeeProfileRequests", fields: [employee_id], references: [id], onDelete: Cascade)
+  reviewer       User?          @relation("HRProfileReviews", fields: [reviewed_by], references: [id], onDelete: NoAction)
+
+  @@index([employee_id])
+  @@index([status])
+  @@map("profile_update_requests")
+}
+
 model Attendance {
   id           String           @id @default(uuid()) @db.Uuid
   employee_id  String           @db.Uuid
@@ -151,8 +172,8 @@ model Attendance {
   created_at   DateTime         @default(now())
   updated_at   DateTime         @updatedAt
   deviceId     String?
-  check_in     DateTime?        @db.Timestamptz
-  check_out    DateTime?        @db.Timestamptz
+  check_in     DateTime?        @db.Timestamptz(6)
+  check_out    DateTime?        @db.Timestamptz(6)
   biometric_id String?
   device       Device?          @relation(fields: [deviceId], references: [serial_number])
   employee     Employee         @relation(fields: [employee_id], references: [id], onDelete: Cascade)
@@ -162,26 +183,21 @@ model Attendance {
 }
 
 model AttendanceRequest {
-  id          String   @id @default(uuid()) @db.Uuid
-  employee_id String   @db.Uuid
-  date        DateTime @db.Date
-
+  id                  String                  @id @default(uuid()) @db.Uuid
+  employee_id         String                  @db.Uuid
+  date                DateTime                @db.Date
   request_type        AttendanceRequestType
-  requested_check_in  DateTime?             @db.Timestamptz
-  requested_check_out DateTime?             @db.Timestamptz
+  requested_check_in  DateTime?               @db.Timestamptz(6)
+  requested_check_out DateTime?               @db.Timestamptz(6)
   requested_status    AttendanceStatus?
-
-  reason String
-
-  status         AttendanceRequestStatus @default(pending)
-  reviewed_by    String?                 @db.Uuid
-  reviewed_at    DateTime?
-  reviewer_notes String?
-
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
-
-  employee Employee @relation(fields: [employee_id], references: [id], onDelete: Cascade)
+  reason              String
+  status              AttendanceRequestStatus @default(pending)
+  reviewed_by         String?                 @db.Uuid
+  reviewed_at         DateTime?
+  reviewer_notes      String?
+  created_at          DateTime                @default(now())
+  updated_at          DateTime                @updatedAt
+  employee            Employee                @relation(fields: [employee_id], references: [id], onDelete: Cascade)
 
   @@index([employee_id])
   @@index([status])
@@ -258,27 +274,24 @@ model Payroll {
 }
 
 model Asset {
-  id            String      @id @default(uuid()) @db.Uuid
-  asset_id      String      @unique
-  name          String
-  status        AssetStatus @default(available)
-  category      String
-  serial_number String?     @unique
-  purchase_cost Decimal?    @db.Decimal(12, 2)
-  purchase_date DateTime?   @db.Date
-  assigned_date DateTime?   @db.Date
-  location      String?
-  notes         String?
-  reason        String?
-  return_date   DateTime?   @db.Date
-  reveiwed_at   DateTime?
-
-  assigned_to         String? @db.Uuid
-  reviewed_by_user_id String? @db.Uuid
-
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
-
+  id                    String               @id @default(uuid()) @db.Uuid
+  asset_id              String               @unique
+  name                  String
+  status                AssetStatus          @default(available)
+  category              String
+  serial_number         String?              @unique
+  purchase_cost         Decimal?             @db.Decimal(12, 2)
+  purchase_date         DateTime?            @db.Date
+  assigned_date         DateTime?            @db.Date
+  location              String?
+  notes                 String?
+  reason                String?
+  return_date           DateTime?            @db.Date
+  reveiwed_at           DateTime?
+  assigned_to           String?              @db.Uuid
+  reviewed_by_user_id   String?              @db.Uuid
+  created_at            DateTime             @default(now())
+  updated_at            DateTime             @updatedAt
   employee              Employee?            @relation("AssetAssignee", fields: [assigned_to], references: [id])
   reviewer              User?                @relation(fields: [reviewed_by_user_id], references: [id], onDelete: NoAction)
   assets_takehome_dates AssetsTakeHomeDate[]
@@ -293,29 +306,24 @@ model AssetsTakeHomeDate {
   start_date DateTime?      @db.Date
   reason     String?
   asset_id   String         @db.Uuid
-
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
-
-  asset Asset @relation(fields: [asset_id], references: [id], onDelete: Cascade)
+  created_at DateTime       @default(now())
+  updated_at DateTime       @updatedAt
+  asset      Asset          @relation(fields: [asset_id], references: [id], onDelete: Cascade)
 
   @@map("assets_takehome_dates")
 }
 
 model Report {
-  id        String     @id @default(uuid()) @db.Uuid
-  name      String
-  type      ReportType
-  from_date DateTime?  @db.Date
-  to_date   DateTime?  @db.Date
-  filters   Json?
-  data      Json?
-
-  generated_by String @db.Uuid
-
-  created_at DateTime @default(now())
-
-  user User @relation(fields: [generated_by], references: [id])
+  id           String     @id @default(uuid()) @db.Uuid
+  name         String
+  type         ReportType
+  from_date    DateTime?  @db.Date
+  to_date      DateTime?  @db.Date
+  filters      Json?
+  data         Json?
+  generated_by String     @db.Uuid
+  created_at   DateTime   @default(now())
+  user         User       @relation(fields: [generated_by], references: [id])
 
   @@map("reports")
 }
@@ -351,20 +359,16 @@ model LeavePolicy {
 }
 
 model LeaveBalance {
-  id          String @id @default(uuid()) @db.Uuid
-  employee_id String @db.Uuid
-  year        Int
-
-  leave_type_id String @db.Uuid
-
-  used Int @default(0)
-
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
-  total      Int      @default(0)
-
-  employee    Employee    @relation(fields: [employee_id], references: [id], onDelete: Cascade)
-  leavePolicy LeavePolicy @relation(fields: [leave_type_id], references: [id], onDelete: Cascade)
+  id            String      @id @default(uuid()) @db.Uuid
+  employee_id   String      @db.Uuid
+  year          Int
+  leave_type_id String      @db.Uuid
+  used          Int         @default(0)
+  created_at    DateTime    @default(now())
+  updated_at    DateTime    @updatedAt
+  total         Int         @default(0)
+  employee      Employee    @relation(fields: [employee_id], references: [id], onDelete: Cascade)
+  leavePolicy   LeavePolicy @relation(fields: [leave_type_id], references: [id], onDelete: Cascade)
 
   @@unique([employee_id, year, leave_type_id])
   @@map("leave_balances")
@@ -454,4 +458,18 @@ enum MunicipalityType {
   sub_metropolitian
   municipality
   rural_municipality
+}
+
+enum ProfileSection {
+  personal
+  documents
+  emergency
+  bank_details
+  department
+}
+
+enum RequestStatus {
+  pending
+  approved
+  rejected
 }

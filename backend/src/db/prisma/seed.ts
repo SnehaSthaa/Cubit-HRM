@@ -101,9 +101,6 @@ async function main() {
     },
   });
 
-  // FIX: department is a separate model, create after employee
-  // FIX: field is `position`, not `designation`
-  // FIX: employment_status enum values are lowercase
   await prisma.department.upsert({
     where: {
       id:
@@ -120,7 +117,7 @@ async function main() {
       joining_date: new Date(),
       employment_status: "active",
       employment_type: "Full-time",
-      position: "System Administrator",
+      designation: "System Administrator",
     },
   });
 
@@ -181,7 +178,7 @@ async function main() {
       joining_date: new Date(),
       employment_status: "active",
       employment_type: "Full-time",
-      position: "HR Manager",
+      designation: "HR Manager",
     },
   });
 
@@ -257,7 +254,7 @@ async function main() {
       joining_date: new Date("2024-01-15"),
       employment_status: "active",
       employment_type: "Full-time",
-      position: "Software Engineer",
+      designation: "Software Engineer",
       level: "Mid",
     },
   });
