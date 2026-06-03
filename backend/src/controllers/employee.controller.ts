@@ -150,7 +150,8 @@ export class EmployeeController {
         !body.first_name ||
         !body.last_name ||
         !body.department_name ||
-        !body.joining_date
+        !body.joining_date ||
+        !body.position
       ) {
         return res
           .status(400)
@@ -229,6 +230,7 @@ export class EmployeeController {
               ...(body.grandfather_name && {
                 grandfather_name: body.grandfather_name,
               }),
+              ...(body.spouse_name && { spouse_name: body.spouse_name }),
               ...(body.current_address && {
                 current_address: body.current_address,
               }),
@@ -258,7 +260,11 @@ export class EmployeeController {
               ...(body.employment_status && {
                 employment_status: body.employment_status,
               }),
+<<<<<<< HEAD
               ...(body.designation && { designation: body.designation }), // ✅ fixed: was body.position
+=======
+              ...(body.position && { position: body.position }),
+>>>>>>> 400241aa6a8b8221a92fa80baa059e2a4bd016cc
               ...(body.level && { level: body.level }),
             },
           },
@@ -289,7 +295,12 @@ export class EmployeeController {
         name: `${body.first_name} ${body.last_name}`,
         employeeId: employee.employee_id,
         department: body.department_name,
+<<<<<<< HEAD
         position: body.designation ?? "", // ✅ fixed: was body.position
+=======
+
+        position: body.position ?? "",
+>>>>>>> 400241aa6a8b8221a92fa80baa059e2a4bd016cc
         email: body.email,
         password: randomPassword,
       });
@@ -351,6 +362,7 @@ export class EmployeeController {
           "father_name",
           "mother_name",
           "grandfather_name",
+          "spouse_name",
           "current_address",
           "permanent_address",
           "country",

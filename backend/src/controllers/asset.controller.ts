@@ -2,8 +2,7 @@ import { Request, Response } from "express";
 import { prisma } from "../db/prisma.js";
 import { ApiResponse, Asset } from "../types/index.js";
 import * as XLSX from "xlsx";
-import { start } from "repl";
-import { date } from "zod";
+
 import { JwtPayload } from "jsonwebtoken";
 
 export class AssetController {
@@ -21,7 +20,23 @@ export class AssetController {
       const assets = await prisma.asset.findMany({
         where,
         include: {
-          employee: true,
+          employee: {
+            include: {
+              personal_details: true,
+              department: {
+                orderBy: {
+                  joining_date: "desc",
+                },
+                take: 1,
+              },
+            },
+          },
+          reviewer: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
         },
         orderBy: {
           created_at: "desc",
@@ -44,10 +59,27 @@ export class AssetController {
   static async getById(req: Request, res: Response<ApiResponse>) {
     try {
       const { id } = req.params;
+
       const asset = await prisma.asset.findUnique({
         where: { id },
         include: {
-          employee: true,
+          employee: {
+            include: {
+              personal_details: true,
+              department: {
+                orderBy: {
+                  joining_date: "desc",
+                },
+                take: 1,
+              },
+            },
+          },
+          reviewer: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
         },
       });
 
@@ -289,28 +321,39 @@ export class AssetController {
   static async exportAssets(req: Request, res: Response) {
     try {
       const assets = await prisma.asset.findMany({
-        include: { employee: true },
+        include: {
+          employee: {
+            include: {
+              personal_details: true,
+              department: {
+                orderBy: { joining_date: "desc" },
+                take: 1,
+              },
+            },
+          },
+        },
       });
+
       const data = assets.map((a) => ({
         AssetID: a.asset_id,
         Name: a.name,
         Type: a.category,
-        SerialNumber: a.serial_number,
+        SerialNumber: a.serial_number ?? "—",
         Status: a.status,
-
-        AssignedTo: a.employee
-          ? `${a.employee.first_name} ${a.employee.last_name}`
-          : "",
-        Department: a.employee?.department || "",
-        PurchaseDate: a.purchase_date,
+        AssignedTo: a.employee?.personal_details
+          ? `${a.employee.personal_details.first_name} ${a.employee.personal_details.last_name}`
+          : "—",
+        Department: a.employee?.department?.[0]?.department_name ?? "—",
+        PurchaseDate: a.purchase_date
+          ? new Date(a.purchase_date).toISOString().split("T")[0]
+          : "—",
       }));
+
       const worksheet = XLSX.utils.json_to_sheet(data);
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, "Assets");
-      const buffer = XLSX.write(workbook, {
-        type: "buffer",
-        bookType: "xlsx",
-      });
+      const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
+
       res.setHeader("Content-Disposition", "attachment; filename=assets.xlsx");
       res.setHeader(
         "Content-Type",
@@ -318,7 +361,7 @@ export class AssetController {
       );
       res.send(buffer);
     } catch (err) {
-      console.log(err);
+      console.error(err);
       res.status(500).json({ message: "Export failed" });
     }
   }
@@ -432,9 +475,20 @@ export class AssetController {
         include: {
           asset: {
             include: {
-              employee: true,
+              employee: {
+                include: {
+                  personal_details: true,
+                  department: {
+                    orderBy: { joining_date: "desc" },
+                    take: 1,
+                  },
+                },
+              },
               reviewer: {
-                select: { id: true, name: true },
+                select: {
+                  id: true,
+                  name: true,
+                },
               },
             },
           },

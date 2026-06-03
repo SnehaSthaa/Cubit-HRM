@@ -64,6 +64,10 @@ model Department {
   previous_experience String?
   employment_type     String?
   employment_status   EmploymentStatus @default(active)
+<<<<<<< HEAD
+=======
+  position            String
+>>>>>>> 400241aa6a8b8221a92fa80baa059e2a4bd016cc
   level               String?
   designation         String?
   employee            Employee         @relation(fields: [employee_id], references: [id], onDelete: Cascade)

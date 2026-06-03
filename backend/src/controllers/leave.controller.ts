@@ -32,7 +32,6 @@ function calcProRataTotal(
   return Math.min(monthsAccrued, annualQuota);
 }
 
-// Helper: get the most recent joining_date from an employee's department array
 function getLatestJoiningDate(
   departments: { joining_date: Date }[],
 ): Date | null {
@@ -515,8 +514,6 @@ export class LeaveController {
     try {
       const year = new Date().getFullYear();
 
-      // FIX: resolved merge conflict — use a single consistent approach
-      // FIX: include personal_details and department (not direct fields on Employee)
       const employees = await prisma.employee.findMany({
         include: {
           personal_details: { select: { first_name: true, last_name: true } },

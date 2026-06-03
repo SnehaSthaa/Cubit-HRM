@@ -46,7 +46,7 @@ export interface DepartmentRecord {
   previous_experience?: string;
   employment_type?: string;
   employment_status?: string;
-  designation?: string;
+  position: string;
   level?: string;
 }
 
@@ -68,6 +68,7 @@ export interface PersonalDetail {
   father_name?: string;
   mother_name?: string;
   grandfather_name?: string;
+  spouse_name?: string;
   current_address?: string;
   permanent_address?: string;
   employment_status?: string;
@@ -219,6 +220,9 @@ export interface Employee {
   emergencyContacts?: EmergencyContact[];
   documents?: EmployeeDocument[];
   assets?: AssetRecord[];
+  user: {
+    role: string;
+  };
 }
 
 // ──── Employee Payloads ────
@@ -231,7 +235,7 @@ export interface CreateEmployeePayload {
   employee_id?: string;
   phone?: string;
   date_of_birth?: string;
-  designation?: string;
+  position?: string;
   employment_type?: string;
   manager_id?: string;
   notes?: string;
@@ -250,27 +254,15 @@ export interface UpdateEmployeePayload {
   notes?: string;
   personal_details?: Partial<Omit<PersonalDetail, "id" | "employee_id">>;
   bank_details?: Partial<Omit<BankDetail, "id" | "employee_id">>;
-  // FIX: department update payload must allow passing id so the backend
-  // knows which row to update (required since the fix in EmployeeController).
+
   department?: Partial<DepartmentRecord>;
 }
 
-// ──── Helper functions ────
-
-/**
- * Returns the most recent department record for an employee.
- *
- * FIX: The backend now returns departments sorted descending by joining_date
- * (newest first), so index [0] is always the current department.
- * The old implementation returned departments[departments.length - 1]
- * (the last element), which was the OLDEST record after the backend sort
- * was added — causing stale department data to appear on every page load.
- */
 export function getLatestDepartment(
   departments: DepartmentRecord[] | null | undefined,
 ): DepartmentRecord | null {
   if (!departments || departments.length === 0) return null;
-  // Backend sorts by joining_date DESC → index 0 is the latest.
+
   return departments[0];
 }
 
@@ -282,7 +274,6 @@ export function normalizeEmployee(emp: EmployeeAPI): Employee {
   return {
     id: emp.id,
     employee_id: emp.employee_id,
-    // Prefer personal_details name; fall back to user.name only if it's not "undefined undefined"
     name:
       fullName ||
       (emp.user?.name?.includes("undefined") ? "" : emp.user?.name) ||
@@ -296,7 +287,6 @@ export function normalizeEmployee(emp: EmployeeAPI): Employee {
     manager_id: emp.manager_id,
     department: emp.department ?? [],
     personal_details: emp.personal_details ?? {
-      // Seed from user so fields aren't blank when personal_details hasn't been filled yet
       id: "",
       employee_id: emp.id,
       first_name: emp.user?.name?.split(" ")[0] ?? "",
@@ -308,6 +298,9 @@ export function normalizeEmployee(emp: EmployeeAPI): Employee {
     emergencyContacts: emp.emergencyContacts,
     documents: emp.documents,
     assets: emp.assets,
+    user: {
+      role: emp.user?.role || "employee",
+    },
   };
 }
 
@@ -387,6 +380,8 @@ export interface LeaveBalance {
   id: string;
   employee_id: string;
   year: number;
+  leavePolicy?: { type: string; name: string };
+
   leave_type_id: string;
   leave_type?: string;
   total: number;
@@ -504,7 +499,20 @@ export interface DashboardStat {
   change: string;
   positive: boolean;
 }
-
+// Offboarding.tsx
+export interface OffboardingEmployee {
+  id: string;
+  employee_id: string;
+  first_name: string;
+  last_name: string;
+  department: string;
+  position: string;
+  employment_status: string;
+  joining_date: string;
+  updated_at: string;
+  profile_image: string;
+  user?: { name: string; email: string };
+}
 export interface PendingAction {
   id: string;
   name: string;

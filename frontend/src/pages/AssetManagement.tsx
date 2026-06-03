@@ -48,7 +48,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useRole } from "@/contexts/RoleContext";
 import { useToast } from "@/hooks/use-toast";
-import { Asset } from "@/types";
+import { Asset, EmployeeAPI } from "@/types";
 import { Textarea } from "@/components/ui/textarea";
 import { DialogDescription } from "@radix-ui/react-dialog";
 import { Protected } from "@/components/common/ProtectedRoute";
@@ -136,11 +136,15 @@ const mapAsset = (a: AssetApi): Asset => ({
   return_date: a.return_date,
   reviewedBy: a.reviewer?.name ?? a.reviewed_by_user_id ?? null,
   reviewedAt: a.reveiwed_at ?? null,
-  assignedTo: a.employee
-    ? `${a.employee.first_name} ${a.employee.last_name}`
+
+  assignedTo: a.employee?.personal_details
+    ? `${a.employee.personal_details.first_name ?? ""} ${a.employee.personal_details.last_name ?? ""}`.trim()
     : null,
+
   assignedToId: a.employee?.id ?? null,
-  department: a.employee?.department ?? null,
+
+  department: a.employee?.department?.[0]?.department_name ?? null,
+
   purchaseDate: a.purchase_date,
   status: normalizeStatus(a.status),
 });
@@ -223,12 +227,14 @@ export default function AssetManagement() {
   const fetchEmployees = async () => {
     try {
       const res = await apiClient.getEmployees();
-      const list: EmployeeApi[] = (res.data as EmployeeApi[]) ?? [];
+      const list: EmployeeAPI[] = (res.data as EmployeeAPI[]) ?? [];
       setEmployees(
         list.map((e) => ({
           id: e.id,
-          name: e.fullName ?? e.full_name ?? e.name ?? e.id,
-          department: e.department,
+          name:
+            `${e.personal_details?.first_name ?? ""} ${e.personal_details?.last_name ?? ""}`.trim() ||
+            "-",
+          department: e.department[0]?.department_name,
         })),
       );
     } catch (err) {

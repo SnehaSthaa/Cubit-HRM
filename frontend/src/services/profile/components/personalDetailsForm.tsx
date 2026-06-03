@@ -130,7 +130,6 @@ export default function PersonalDetailForm({
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 max-w-md">
-
       {/* ── Name ── */}
       <Field label="First Name" error={errors.first_name?.message}>
         <input
@@ -160,6 +159,7 @@ export default function PersonalDetailForm({
         />
       </Field>
 
+<<<<<<< HEAD
       <Field label="Phone" error={errors.phone?.message}>
         <input
           type="tel"
@@ -251,6 +251,9 @@ export default function PersonalDetailForm({
           placeholder="Digits only, 5–20 characters"
         />
       </Field>
+=======
+      {/* ── SSF_SSID ── */}
+>>>>>>> 400241aa6a8b8221a92fa80baa059e2a4bd016cc
 
       {/* ── Family ── */}
       <Field label="Father's Name" error={errors.father_name?.message}>

@@ -34,6 +34,7 @@ export const employeeSchema = z.object({
   father_name: z.string().optional(),
   grandfather_name: z.string().optional(),
   mother_name: z.string().optional(),
+  spouse_name: z.string().optional(),
 
   // Identity
   citizenship_number: z.string().optional(),

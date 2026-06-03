@@ -99,6 +99,7 @@ export interface EmployeeDTO {
   grandfather_name?: string;
   current_address?: string;
   permanent_address?: string;
+  spouse_name?: string;
   country?: string;
   state?: string;
   district?: string;
@@ -116,7 +117,7 @@ export interface EmployeeDTO {
 
   // From Department (latest/current entry)
   department_name?: string;
-  designation?: string;
+  position?: string;
   joining_date?: Date;
   employment_type?: EmploymentType;
   employment_status?: EmploymentStatus;
@@ -142,6 +143,7 @@ export interface PersonalDetail {
   father_name?: string;
   mother_name?: string;
   grandfather_name?: string;
+  spouse_name?: string;
   current_address?: string;
   permanent_address?: string;
   country?: string;
@@ -172,7 +174,7 @@ export interface Department {
   previous_experience?: string;
   employment_type?: EmploymentType;
   employment_status?: EmploymentStatus;
-  designation?: string;
+  position?: string;
   level?: string;
 }
 

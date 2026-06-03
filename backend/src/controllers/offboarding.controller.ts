@@ -1,13 +1,17 @@
 import { Request, Response } from "express";
 import { prisma } from "@/db/prisma";
 import { EmploymentStatus } from "@prisma/client";
+import { tr } from "zod/locales";
 
 export class OffboardingController {
   static async startOffboarding(req: Request, res: Response) {
     try {
       const { id } = req.params;
 
-      const employee = await prisma.employee.findUnique({ where: { id } });
+      const employee = await prisma.employee.findUnique({
+        where: { id },
+        include: { department: true },
+      });
 
       if (!employee) {
         return res
@@ -15,18 +19,26 @@ export class OffboardingController {
           .json({ success: false, message: "Employee not found" });
       }
 
-      if (employee.employment_status !== EmploymentStatus.active) {
+      const activeDept = employee.department.find(
+        (d) => d.employment_status === EmploymentStatus.active,
+      );
+
+      if (!activeDept) {
         return res.status(400).json({
           success: false,
-          message: "Only active employees can be offboarded",
+          message: "Department not found for employee",
         });
       }
 
-      const updated = await prisma.employee.update({
-        where: { id },
-        data: {
-          employment_status: EmploymentStatus.notice_period,
-          employee_verified: false,
+      const updated = await prisma.department.update({
+        where: { id: activeDept.id },
+        data: { employment_status: EmploymentStatus.notice_period },
+        include: {
+          employee: {
+            select: {
+              employee_verified: false,
+            },
+          },
         },
       });
 
@@ -40,33 +52,64 @@ export class OffboardingController {
     }
   }
 
-  // GET /offboarding — all employees on notice_period or resigned
   static async getOffboardingEmployees(req: Request, res: Response) {
     try {
       const employees = await prisma.employee.findMany({
         where: {
-          employment_status: {
-            in: [EmploymentStatus.notice_period, EmploymentStatus.resigned],
+          department: {
+            some: {
+              employment_status: {
+                in: [EmploymentStatus.notice_period, EmploymentStatus.resigned],
+              },
+            },
           },
         },
         include: {
           user: { select: { id: true, name: true, email: true } },
+          department: true,
+          personal_details: true,
         },
         orderBy: { updated_at: "desc" },
       });
 
-      return res.json({ success: true, data: employees });
+      return res.json({
+        success: true,
+        data: employees.map((emp) => {
+          const activeDept =
+            emp.department.find(
+              (d) => d.employment_status === EmploymentStatus.notice_period,
+            ) ??
+            emp.department.find(
+              (d) => d.employment_status === EmploymentStatus.resigned,
+            );
+
+          return {
+            ...(emp.personal_details ?? {}),
+            id: emp.id,
+            employee_id: emp.employee_id,
+            updated_at: emp.updated_at.toISOString(),
+            profile_image: emp.profile_image ?? "",
+            user: emp.user,
+            department: activeDept?.department_name ?? "",
+            position: activeDept?.position ?? "",
+            employment_status: activeDept?.employment_status ?? "",
+            joining_date: activeDept?.joining_date?.toISOString() ?? "",
+          };
+        }),
+      });
     } catch (error: any) {
       return res.status(500).json({ success: false, message: error.message });
     }
   }
 
-  // PATCH /offboarding/:id/complete — mark as resigned
   static async completeOffboarding(req: Request, res: Response) {
     try {
       const { id } = req.params;
 
-      const employee = await prisma.employee.findUnique({ where: { id } });
+      const employee = await prisma.employee.findUnique({
+        where: { id },
+        include: { department: true },
+      });
 
       if (!employee) {
         return res
@@ -74,19 +117,20 @@ export class OffboardingController {
           .json({ success: false, message: "Employee not found" });
       }
 
-      if (employee.employment_status !== EmploymentStatus.notice_period) {
+      const noticeDept = employee.department.find(
+        (d) => d.employment_status === EmploymentStatus.notice_period,
+      );
+
+      if (!noticeDept) {
         return res.status(400).json({
           success: false,
-          message: "Only employees on notice period can be completed",
+          message: "Department not found",
         });
       }
 
-      const updated = await prisma.employee.update({
-        where: { id },
+      const updated = await prisma.department.update({
+        where: { id: noticeDept.id },
         data: { employment_status: EmploymentStatus.resigned },
-        include: {
-          user: { select: { id: true, name: true, email: true } },
-        },
       });
 
       return res.json({

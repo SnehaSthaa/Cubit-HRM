@@ -3,31 +3,84 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { z } from "zod";
 import {
-  User, FileText, CreditCard, CalendarDays, Edit2, Upload, Plus,
-  Phone, Mail, Building2, Package, AlertCircle, Check, X, Trash2,
-  Save, Stethoscope, type LucideIcon, Briefcase, Plane, Coffee,
-  AlertTriangle, Baby, Loader2, CheckSquare, ChevronDown, ShieldCheck,
-  ShieldAlert, KeyRound, EyeOff, Eye,
+  User,
+  FileText,
+  CreditCard,
+  CalendarDays,
+  Edit2,
+  Upload,
+  Plus,
+  Phone,
+  Mail,
+  Building2,
+  Package,
+  AlertCircle,
+  Check,
+  X,
+  Trash2,
+  Save,
+  Stethoscope,
+  type LucideIcon,
+  Briefcase,
+  Plane,
+  Coffee,
+  AlertTriangle,
+  Baby,
+  Loader2,
+  CheckSquare,
+  ChevronDown,
+  ShieldCheck,
+  ShieldAlert,
+  KeyRound,
+  EyeOff,
+  Eye,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { useRole } from "@/contexts/RoleContext";
-import type { Employee, EmployeeAPI, EmergencyContact, EmployeeDocument, LeaveBalance } from "@/types";
+import type {
+  Employee,
+  EmployeeAPI,
+  EmergencyContact,
+  EmployeeDocument,
+  LeaveBalance,
+} from "@/types";
 import { getLatestDepartment, normalizeEmployee } from "@/types";
 import { apiClient, type AssetApi } from "@/services/apiClient";
+import { useNavigate } from "react-router-dom";
 
 // ── Regex patterns ────────────────────────────────────────────────────────────
+<<<<<<< HEAD
 const nepaliPhone    = /^(\+977[-\s]?)?[9][6-9]\d{8}$/;
 const citizenshipRgx = /^\d{2}-\d{2}-\d{2}-\d{5}$/;
 const panRgx         = /^[A-Z]{3}\d{7}$/;
 const nidRgx         = /^\d{16}$/;
 const nameRgx        = /^[a-zA-Z\s'.,-]+$/;
 const ssfRgx = /^\d{16}$/;
+=======
+const nepaliPhone = /^(\+977[-\s]?)?[9][6-9]\d{8}$/;
+const citizenshipRgx = /^\d{2}-\d{2}-\d{2}-\d{5}$/; // e.g. 01-01-78-00123
+const panRgx = /^[A-Z]{3}\d{7}$/; // e.g. ABC1234567
+const nidRgx = /^\d{16}$/;
+const nameRgx = /^[a-zA-Z\s'.,-]+$/;
+>>>>>>> 400241aa6a8b8221a92fa80baa059e2a4bd016cc
 
 function ageAtLeast(years: number) {
   return (dob: string) => {
@@ -36,7 +89,9 @@ function ageAtLeast(years: number) {
     const age =
       today.getFullYear() -
       birth.getFullYear() -
-      (today < new Date(today.getFullYear(), birth.getMonth(), birth.getDate()) ? 1 : 0);
+      (today < new Date(today.getFullYear(), birth.getMonth(), birth.getDate())
+        ? 1
+        : 0);
     return age >= years;
   };
 }
@@ -63,7 +118,10 @@ const updatePersonalDetailSchema = z.object({
     .trim()
     .min(1, "First name is required")
     .max(50, "First name must be under 50 characters")
-    .regex(nameRgx, "First name must contain letters only (no numbers or special characters)")
+    .regex(
+      nameRgx,
+      "First name must contain letters only (no numbers or special characters)",
+    )
     .optional(),
 
   last_name: z
@@ -71,7 +129,10 @@ const updatePersonalDetailSchema = z.object({
     .trim()
     .min(1, "Last name is required")
     .max(50, "Last name must be under 50 characters")
-    .regex(nameRgx, "Last name must contain letters only (no numbers or special characters)")
+    .regex(
+      nameRgx,
+      "Last name must contain letters only (no numbers or special characters)",
+    )
     .optional(),
 
   email: z
@@ -84,7 +145,10 @@ const updatePersonalDetailSchema = z.object({
     (v) => (v === "" || v === null ? undefined : v),
     z
       .string()
-      .regex(nepaliPhone, "Phone must be a valid Nepali number starting with 98, 97, 96 etc. (e.g. 9812345678)")
+      .regex(
+        nepaliPhone,
+        "Phone must be a valid Nepali number starting with 98, 97, 96 etc. (e.g. 9812345678)",
+      )
       .optional(),
   ),
 
@@ -92,6 +156,7 @@ const updatePersonalDetailSchema = z.object({
     (v) => (v === "" || v === null ? undefined : v),
     z
       .string()
+<<<<<<< HEAD
       .refine((v) => !v || !isNaN(new Date(v).getTime()), "Date of birth is not a valid date")
       .refine((v) => {
         if (!v) return true;
@@ -99,12 +164,33 @@ const updatePersonalDetailSchema = z.object({
         return v < today;
       }, "Date of birth cannot be today or in the future")
       .refine((v) => !v || ageAtLeast(18)(v), "You must be at least 18 years old")
+=======
+      .refine(
+        (v) => !v || !isNaN(new Date(v).getTime()),
+        "Date of birth is not a valid date",
+      )
+      .refine((v) => {
+        if (!v) return true;
+        // Compare date strings directly to avoid timezone issues
+        const today = new Date().toISOString().split("T")[0];
+        return v < today;
+      }, "Date of birth cannot be today or in the future")
+      .refine(
+        (v) => !v || ageAtLeast(18)(v),
+        "You must be at least 18 years old",
+      )
+>>>>>>> 400241aa6a8b8221a92fa80baa059e2a4bd016cc
       .optional(),
   ),
 
   gender: fuzzyEnum(["Male", "Female", "Others"]).optional(),
 
-  marital_status: fuzzyEnum(["Single", "Married", "Divorced", "Widowed"]).optional(),
+  marital_status: fuzzyEnum([
+    "Single",
+    "Married",
+    "Divorced",
+    "Widowed",
+  ]).optional(),
 
   citizenship_number: z.preprocess(
     (v) => (v === "" || v === null ? undefined : v),
@@ -132,7 +218,14 @@ const updatePersonalDetailSchema = z.object({
     (v) => (v === "" || v === null ? undefined : v),
     z
       .string()
+<<<<<<< HEAD
       .regex(nidRgx, "NID must be exactly 10 digits — no letters, spaces, or dashes")
+=======
+      .regex(
+        nidRgx,
+        "NID must be exactly 16 digits — no letters, spaces, or dashes",
+      )
+>>>>>>> 400241aa6a8b8221a92fa80baa059e2a4bd016cc
       .optional(),
   ),
 
@@ -150,7 +243,19 @@ const updatePersonalDetailSchema = z.object({
       .string()
       .trim()
       .max(100, "Father's name must be under 100 characters")
-      .regex(nameRgx, "Father's name must contain letters only (no numbers or special characters)")
+      .regex(
+        nameRgx,
+        "Father's name must contain letters only (no numbers or special characters)",
+      )
+      .optional(),
+  ),
+  spouse_name: z.preprocess(
+    (v) => (v === "" || v === null ? undefined : v),
+    z
+      .string()
+      .trim()
+      .max(100, "Spouse name must be under 100 characters")
+      .regex(nameRgx, "Spouse name must contain letters only")
       .optional(),
   ),
 
@@ -160,7 +265,10 @@ const updatePersonalDetailSchema = z.object({
       .string()
       .trim()
       .max(100, "Mother's name must be under 100 characters")
-      .regex(nameRgx, "Mother's name must contain letters only (no numbers or special characters)")
+      .regex(
+        nameRgx,
+        "Mother's name must contain letters only (no numbers or special characters)",
+      )
       .optional(),
   ),
 
@@ -170,7 +278,10 @@ const updatePersonalDetailSchema = z.object({
       .string()
       .trim()
       .max(100, "Grandfather's name must be under 100 characters")
-      .regex(nameRgx, "Grandfather's name must contain letters only (no numbers or special characters)")
+      .regex(
+        nameRgx,
+        "Grandfather's name must contain letters only (no numbers or special characters)",
+      )
       .optional(),
   ),
 
@@ -197,21 +308,40 @@ const updatePersonalDetailSchema = z.object({
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface BankFormData {
-  bank_name: string; account_number: string; branch: string;
-  salary: string; contract_type: string;
+  bank_name: string;
+  account_number: string;
+  branch: string;
+  salary: string;
+  contract_type: string;
 }
 interface DeptFormData {
-  department_name: string; designation: string; level: string;
-  hierarchy: string; joining_date: string; previous_experience: string;
-  employment_type: string; employment_status: string;
+  department_name: string;
+  position: string;
+  level: string;
+  hierarchy: string;
+  joining_date: string;
+  previous_experience: string;
+  employment_type: string;
+  employment_status: string;
 }
 interface ProfileFormData {
-  first_name: string; last_name: string; email: string; phone: string;
-  date_of_birth: string; gender: string; marital_status: string;
-  father_name: string; grandfather_name: string; mother_name: string;
-  current_address: string; permanent_address: string;
-  citizenship_number: string; pan_number: string;
-  nid_number: string; ssid_number: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone: string;
+  date_of_birth: string;
+  gender: string;
+  marital_status: string;
+  father_name: string;
+  grandfather_name: string;
+  mother_name: string;
+  current_address: string;
+  spouse_name: string;
+  permanent_address: string;
+  citizenship_number: string;
+  pan_number: string;
+  nid_number: string;
+  ssid_number: string;
 }
 interface RawEmployeeRecord {
   id: string;
@@ -223,8 +353,14 @@ interface RawEmployeeRecord {
 type Section = "profile" | "bank" | "department";
 type ProfileErrors = Partial<Record<keyof ProfileFormData, string>>;
 
-const itemVariant = { hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0 } };
-const containerVariant = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.04 } } };
+const itemVariant = {
+  hidden: { opacity: 0, y: 10 },
+  show: { opacity: 1, y: 0 },
+};
+const containerVariant = {
+  hidden: { opacity: 0 },
+  show: { opacity: 1, transition: { staggerChildren: 0.04 } },
+};
 
 // ── localStorage helpers ──────────────────────────────────────────────────────
 function lsKey(employeeId: string, suffix: string) {
@@ -274,26 +410,84 @@ function FieldError({ message }: { message?: string }) {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const leaveTypeIcons: Record<string, LucideIcon> = {
-  sick: Stethoscope, paid: Briefcase, vacation: Plane,
-  casual: Coffee, unpaid: AlertTriangle, maternity: Baby,
+  "Annual Leave": CalendarDays,
+  "Sick Leave": Stethoscope,
+  "Paid Leave": Briefcase,
+  Vacation: Plane,
+  "Casual Leave": Coffee,
+  "Unpaid Leave": AlertTriangle,
+  "Maternity Leave": Baby,
+  "Personal Leave": User,
+  "Compensatory Leave": CheckSquare,
 };
 const enumToLeaveType: Record<string, string> = {
-  sick: "Sick Leave", personal: "Personal Leave", vacation: "Vacation",
-  maternity: "Maternity Leave", casual: "Casual Leave", unpaid: "Unpaid Leave",
-  paid: "Paid Leave", compensatory: "Compensatory Leave",
+  sick: "Sick Leave",
+  personal: "Personal Leave",
+  vacation: "Vacation",
+  maternity: "Maternity Leave",
+  casual: "Casual Leave",
+  unpaid: "Unpaid Leave",
+  paid: "Paid Leave",
+  compensatory: "Compensatory Leave",
 };
-const documentTypes = ["Citizenship", "PAN", "Certificate", "National Identification", "Police Report", "SSF", "Other"];
+const documentTypes = [
+  "Citizenship",
+  "PAN",
+  "Certificate",
+  "National Identification",
+  "Police Report",
+  "Marriage Certificate",
+  "SSF",
+  "Other",
+];
 const docStatusClass: Record<string, string> = {
-  Verified: "status-active", Pending: "status-pending", Rejected: "status-resigned",
+  Verified: "status-active",
+  Pending: "status-pending",
+  Rejected: "status-resigned",
 };
 const empStatusClass: Record<string, string> = {
-  Active: "status-active", "On Leave": "status-pending",
-  "Notice Period": "status-notice", Resigned: "status-resigned", Inactive: "status-inactive",
+  active: "status-active",
+
+  notice_period: "notice_period",
+  resigned: "status-resigned",
 };
 
-const EMPTY_BANK: BankFormData = { bank_name: "", account_number: "", branch: "", salary: "", contract_type: "" };
-const EMPTY_DEPT: DeptFormData = { department_name: "", designation: "", level: "", hierarchy: "", joining_date: "", previous_experience: "", employment_type: "", employment_status: "" };
-const EMPTY_PROFILE: ProfileFormData = { first_name: "", last_name: "", email: "", phone: "", date_of_birth: "", gender: "", marital_status: "", father_name: "", grandfather_name: "", mother_name: "", current_address: "", permanent_address: "", citizenship_number: "", pan_number: "", nid_number: "", ssid_number: "" };
+const EMPTY_BANK: BankFormData = {
+  bank_name: "",
+  account_number: "",
+  branch: "",
+  salary: "",
+  contract_type: "",
+};
+const EMPTY_DEPT: DeptFormData = {
+  department_name: "",
+  position: "",
+  level: "",
+  hierarchy: "",
+  joining_date: "",
+  previous_experience: "",
+  employment_type: "",
+  employment_status: "",
+};
+const EMPTY_PROFILE: ProfileFormData = {
+  first_name: "",
+  last_name: "",
+  email: "",
+  phone: "",
+  date_of_birth: "",
+  gender: "",
+  marital_status: "",
+  father_name: "",
+  grandfather_name: "",
+  mother_name: "",
+  current_address: "",
+  spouse_name: "",
+  permanent_address: "",
+  citizenship_number: "",
+  pan_number: "",
+  nid_number: "",
+  ssid_number: "",
+};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function toDateStr(val: unknown): string {
@@ -306,54 +500,56 @@ function toDateStr(val: unknown): string {
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message;
-  if (err && typeof err === "object" && "message" in err) return String((err as Record<string, unknown>).message);
+  if (err && typeof err === "object" && "message" in err)
+    return String((err as Record<string, unknown>).message);
   return "An unexpected error occurred";
 }
 
 function profileFromEmployee(e: Employee, userEmail?: string): ProfileFormData {
   const p = e.personal_details;
   return {
-    first_name:         p?.first_name         ?? "",
-    last_name:          p?.last_name          ?? "",
-    email:              p?.email              ?? userEmail ?? "",
-    phone:              p?.phone              ?? "",
-    date_of_birth:      toDateStr(p?.date_of_birth),
-    gender:             p?.gender             ?? "",
-    marital_status:     p?.marital_status     ?? "",
-    father_name:        p?.father_name        ?? "",
-    grandfather_name:   p?.grandfather_name   ?? "",
-    mother_name:        p?.mother_name        ?? "",
-    current_address:    p?.current_address    ?? "",
-    permanent_address:  p?.permanent_address  ?? "",
+    first_name: p?.first_name ?? "",
+    last_name: p?.last_name ?? "",
+    email: p?.email ?? userEmail ?? "",
+    phone: p?.phone ?? "",
+    date_of_birth: toDateStr(p?.date_of_birth),
+    gender: p?.gender ?? "",
+    marital_status: p?.marital_status ?? "",
+    father_name: p?.father_name ?? "",
+    grandfather_name: p?.grandfather_name ?? "",
+    mother_name: p?.mother_name ?? "",
+    current_address: p?.current_address ?? "",
+    spouse_name: p?.spouse_name ?? "",
+    permanent_address: p?.permanent_address ?? "",
     citizenship_number: p?.citizenship_number ?? "",
-    pan_number:         p?.pan_number         ?? "",
-    nid_number:         p?.nid_number         ?? "",
-    ssid_number:        p?.ssid_number        ?? "",
+    pan_number: p?.pan_number ?? "",
+    nid_number: p?.nid_number ?? "",
+    ssid_number: p?.ssid_number ?? "",
   };
 }
 
 function bankFromEmployee(e: Employee): BankFormData {
   const b = e.bank_details;
   return {
-    bank_name:      b?.bank_name      ?? "",
+    bank_name: b?.bank_name ?? "",
     account_number: b?.account_number ?? "",
-    branch:         b?.branch         ?? "",
-    salary:         b?.salary ? String(b.salary) : "",
-    contract_type:  b?.contract_type  ?? "",
+    branch: b?.branch ?? "",
+    salary: b?.salary ? String(b.salary) : "",
+    contract_type: b?.contract_type ?? "",
   };
 }
 
 function deptFromEmployee(e: Employee): DeptFormData {
   const d = getLatestDepartment(e.department);
   return {
-    department_name:     d?.department_name     ?? "",
-    designation:         d?.designation         ?? "",
-    level:               d?.level               ?? "",
-    hierarchy:           d?.hierarchy           ?? "",
-    joining_date:        toDateStr(d?.joining_date),
+    department_name: d?.department_name ?? "",
+    position: d?.position ?? "",
+    level: d?.level ?? "",
+    hierarchy: d?.hierarchy ?? "",
+    joining_date: toDateStr(d?.joining_date),
     previous_experience: d?.previous_experience ?? "",
-    employment_type:     d?.employment_type     ?? "",
-    employment_status:   d?.employment_status   ?? "",
+    employment_type: d?.employment_type ?? "",
+    employment_status: d?.employment_status ?? "",
   };
 }
 
@@ -361,6 +557,7 @@ function deptFromEmployee(e: Employee): DeptFormData {
 export default function EmployeeSelfService() {
   const { toast } = useToast();
   const { isHR } = useRole();
+  const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const docFileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -372,21 +569,37 @@ export default function EmployeeSelfService() {
 
   // ── FIX: persisted pending state (survives refresh) ──────────────────────
   const [hasUnverifiedChanges, setHasUnverifiedChanges] = useState(false);
+<<<<<<< HEAD
   const [changedSections, setChangedSections] = useState<Set<Section>>(new Set());
   // ─────────────────────────────────────────────────────────────────────────
 
   const [approvingAll, setApprovingAll] = useState(false);
+=======
+  const [approvingAll, setApprovingAll] = useState(false);
+  const [changedSections, setChangedSections] = useState<Set<Section>>(
+    new Set(),
+  );
+>>>>>>> 400241aa6a8b8221a92fa80baa059e2a4bd016cc
   const [statusDialog, setStatusDialog] = useState(false);
   const [empStatus, setEmpStatus] = useState("Active");
   const [editing, setEditing] = useState(false);
-  const [profileForm, setProfileForm] = useState<ProfileFormData>(EMPTY_PROFILE);
+  const [profileForm, setProfileForm] =
+    useState<ProfileFormData>(EMPTY_PROFILE);
   const [profileErrors, setProfileErrors] = useState<ProfileErrors>({});
   const [profileImage, setProfileImage] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
-  const [passwordForm, setPasswordForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
+  const [passwordForm, setPasswordForm] = useState({
+    currentPassword: "",
+    newPassword: "",
+    confirmPassword: "",
+  });
   const [passwordError, setPasswordError] = useState("");
-  const [showPasswords, setShowPasswords] = useState({ currentPassword: false, newPassword: false, confirmPassword: false });
+  const [showPasswords, setShowPasswords] = useState({
+    currentPassword: false,
+    newPassword: false,
+    confirmPassword: false,
+  });
   const [bankCommitted, setBankCommitted] = useState<BankFormData>(EMPTY_BANK);
   const [bankDraft, setBankDraft] = useState<BankFormData>(EMPTY_BANK);
   const [editingBank, setEditingBank] = useState(false);
@@ -398,17 +611,36 @@ export default function EmployeeSelfService() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [uploadingDoc, setUploadingDoc] = useState(false);
-  const [emergencyContacts, setEmergencyContacts] = useState<EmergencyContact[]>([]);
+  const [emergencyContacts, setEmergencyContacts] = useState<
+    EmergencyContact[]
+  >([]);
   const [addContactDialog, setAddContactDialog] = useState(false);
-  const [newContact, setNewContact] = useState({ name: "", relation: "", phone: "", email: "" });
+  const [newContact, setNewContact] = useState({
+    name: "",
+    relation: "",
+    phone: "",
+    email: "",
+  });
   const [editingContactId, setEditingContactId] = useState<string | null>(null);
-  const [editContactData, setEditContactData] = useState({ name: "", relation: "", phone: "", email: "" });
+  const [editContactData, setEditContactData] = useState({
+    name: "",
+    relation: "",
+    phone: "",
+    email: "",
+  });
   const [employeeAssets, setEmployeeAssets] = useState<AssetApi[]>([]);
   const [assetRequestDialog, setAssetRequestDialog] = useState(false);
-  const [assetRequest, setAssetRequest] = useState({ type: "", name: "", reason: "" });
+  const [assetRequest, setAssetRequest] = useState({
+    type: "",
+    name: "",
+    reason: "",
+  });
 
-  const pendingDocCount = documents.filter((d) => d.status === "Pending").length;
-  const showApprovalBanner = isHR && (hasUnverifiedChanges || pendingDocCount > 0);
+  const pendingDocCount = documents.filter(
+    (d) => d.status === "Pending",
+  ).length;
+  const showApprovalBanner =
+    isHR && (hasUnverifiedChanges || pendingDocCount > 0);
 
   // ── FIX: markChanged now persists to localStorage ─────────────────────────
   function markChanged(section: Section) {
@@ -438,10 +670,14 @@ export default function EmployeeSelfService() {
         setLoading(true);
         const res = await apiClient.getMe();
         const meUser = res.data?.user;
-        let rawEmployee = (res.data?.employee as unknown as EmployeeAPI | null) ?? null;
+        let rawEmployee =
+          (res.data?.employee as unknown as EmployeeAPI | null) ?? null;
 
         if (!meUser) {
-          toast({ title: "Could not identify logged-in user", variant: "destructive" });
+          toast({
+            title: "Could not identify logged-in user",
+            variant: "destructive",
+          });
           setLoading(false);
           return;
         }
@@ -449,9 +685,11 @@ export default function EmployeeSelfService() {
         if (!rawEmployee) {
           try {
             const allRes = await apiClient.getEmployees();
-            const employees = (allRes.data ?? []) as unknown as RawEmployeeRecord[];
+            const employees = (allRes.data ??
+              []) as unknown as RawEmployeeRecord[];
             const found = employees.find((emp) => {
-              if (emp.user_id && meUser.id && emp.user_id === meUser.id) return true;
+              if (emp.user_id && meUser.id && emp.user_id === meUser.id)
+                return true;
               const pdEmail = emp.personal_details?.email ?? "";
               return pdEmail.toLowerCase() === meUser.email.toLowerCase();
             });
@@ -464,7 +702,8 @@ export default function EmployeeSelfService() {
         if (!rawEmployee) {
           toast({
             title: "No employee profile found",
-            description: "Your account is not linked to an employee record. Please contact HR.",
+            description:
+              "Your account is not linked to an employee record. Please contact HR.",
             variant: "destructive",
           });
           setLoading(false);
@@ -476,10 +715,13 @@ export default function EmployeeSelfService() {
         setProfileForm(profileFromEmployee(e, meUser.email));
         const latestDept = getLatestDepartment(e.department);
         setEmpStatus(latestDept?.employment_status ?? "Active");
-        if (e.profile_image) setProfileImage(`${e.profile_image}?t=${Date.now()}`);
+        if (e.profile_image)
+          setProfileImage(`${e.profile_image}?t=${Date.now()}`);
         const bank = bankFromEmployee(e);
-        setBankCommitted(bank); setBankDraft(bank);
+        setBankCommitted(bank);
+        setBankDraft(bank);
         const dept = deptFromEmployee(e);
+<<<<<<< HEAD
         setDeptCommitted(dept); setDeptDraft(dept);
         if (Array.isArray(e.documents) && e.documents.length) setDocuments(e.documents);
 
@@ -491,43 +733,72 @@ export default function EmployeeSelfService() {
         }
         // ────────────────────────────────────────────────────────────────────
 
+=======
+        setDeptCommitted(dept);
+        setDeptDraft(dept);
+        if (Array.isArray(e.documents) && e.documents.length)
+          setDocuments(e.documents);
+>>>>>>> 400241aa6a8b8221a92fa80baa059e2a4bd016cc
       } catch (err) {
-        toast({ title: "Failed to load profile", description: errMsg(err), variant: "destructive" });
+        toast({
+          title: "Failed to load profile",
+          description: errMsg(err),
+          variant: "destructive",
+        });
       } finally {
         setLoading(false);
       }
     })();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Load sub-resources ────────────────────────────────────────────────────
   useEffect(() => {
     if (!employee?.id) return;
-    apiClient.getDocuments(employee.id)
-      .then((res) => { const docs = (res.data as EmployeeDocument[]) ?? []; if (docs.length > 0) setDocuments(docs); })
+    apiClient
+      .getDocuments(employee.id)
+      .then((res) => {
+        const docs = (res.data as EmployeeDocument[]) ?? [];
+        if (docs.length > 0) setDocuments(docs);
+      })
       .catch(console.error);
-    apiClient.getEmergencyContacts(employee.id)
-      .then((res) => { if (Array.isArray(res.data)) setEmergencyContacts(res.data as EmergencyContact[]); })
+    apiClient
+      .getEmergencyContacts(employee.id)
+      .then((res) => {
+        if (Array.isArray(res.data))
+          setEmergencyContacts(res.data as EmergencyContact[]);
+      })
       .catch(console.error);
-    apiClient.getAssets({ assigned_to: employee.id })
+    apiClient
+      .getAssets({ assigned_to: employee.id })
       .then((res) => setEmployeeAssets(res.data ?? []))
       .catch(console.error);
   }, [employee?.id]);
 
   // ── Load leave balance ────────────────────────────────────────────────────
-  const fetchLeaveBalance = useCallback(async (employeeId: string) => {
-    try {
-      const res = await apiClient.getLeaveBalance(employeeId);
-      if (res?.data) {
-        setLeaveBalance(res.data.map((l: LeaveBalance) => ({
-          ...l,
-          name: enumToLeaveType[l.leave_type_id] ?? l.leave_type_id,
-        })));
+  const fetchLeaveBalance = useCallback(
+    async (employeeId: string) => {
+      try {
+        const res = await apiClient.getLeaveBalance(employeeId);
+        if (res?.data) {
+          setLeaveBalance(
+            res.data.map((l: LeaveBalance) => ({
+              ...l,
+              // leave_type is already the display name e.g. "Annual Leave"
+              name: l.leave_type,
+            })),
+          );
+        }
+      } catch (err) {
+        toast({
+          title: "Failed to fetch leave balance",
+          description: errMsg(err),
+          variant: "destructive",
+        });
       }
-    } catch (err) {
-      toast({ title: "Failed to fetch leave balance", description: errMsg(err), variant: "destructive" });
-    }
-  }, [toast]);
+    },
+    [toast],
+  );
 
   useEffect(() => {
     if (!employee?.id) return;
@@ -535,27 +806,44 @@ export default function EmployeeSelfService() {
   }, [employee?.id, fetchLeaveBalance]);
 
   // ── Handlers ──────────────────────────────────────────────────────────────
-  const handleProfileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleProfileUpload = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
     if (!e.target.files?.[0] || !employee?.id) return;
     try {
       setUploading(true);
-      const res = await apiClient.uploadEmployeeProfileImage(employee.id, e.target.files[0]);
+      const res = await apiClient.uploadEmployeeProfileImage(
+        employee.id,
+        e.target.files[0],
+      );
       const imageUrl = res.data?.profile_image as string | undefined;
       if (imageUrl) setProfileImage(`${imageUrl}?t=${Date.now()}`);
       if (fileInputRef.current) fileInputRef.current.value = "";
     } catch (err) {
-      toast({ title: "Upload failed", description: errMsg(err), variant: "destructive" });
-    } finally { setUploading(false); }
+      toast({
+        title: "Upload failed",
+        description: errMsg(err),
+        variant: "destructive",
+      });
+    } finally {
+      setUploading(false);
+    }
   };
 
   const handleSaveProfile = async () => {
     if (!employee?.id) return;
     setProfileErrors({});
+<<<<<<< HEAD
 
+=======
+>>>>>>> 400241aa6a8b8221a92fa80baa059e2a4bd016cc
     const result = updatePersonalDetailSchema.safeParse(
       Object.fromEntries(
-        Object.entries(profileForm).map(([k, v]) => [k, v === "" ? undefined : v])
-      )
+        Object.entries(profileForm).map(([k, v]) => [
+          k,
+          v === "" ? undefined : v,
+        ]),
+      ),
     );
 
     if (!result.success) {
@@ -580,61 +868,74 @@ export default function EmployeeSelfService() {
       setSaving(true);
       const clean = (v: string) => v.trim() || undefined;
       const payload: Record<string, unknown> = {
-        first_name:         profileForm.first_name.trim(),
-        last_name:          profileForm.last_name.trim(),
-        email:              profileForm.email.trim(),
-        phone:              clean(profileForm.phone),
-        date_of_birth:      clean(profileForm.date_of_birth),
-        gender:             clean(profileForm.gender),
-        marital_status:     clean(profileForm.marital_status),
-        father_name:        clean(profileForm.father_name),
-        grandfather_name:   clean(profileForm.grandfather_name),
-        mother_name:        clean(profileForm.mother_name),
-        current_address:    clean(profileForm.current_address),
-        permanent_address:  clean(profileForm.permanent_address),
+        first_name: profileForm.first_name.trim(),
+        last_name: profileForm.last_name.trim(),
+        email: profileForm.email.trim(),
+        phone: clean(profileForm.phone),
+        date_of_birth: clean(profileForm.date_of_birth),
+        gender: clean(profileForm.gender),
+        marital_status: clean(profileForm.marital_status),
+        father_name: clean(profileForm.father_name),
+        grandfather_name: clean(profileForm.grandfather_name),
+        mother_name: clean(profileForm.mother_name),
+        current_address: clean(profileForm.current_address),
+        permanent_address: clean(profileForm.permanent_address),
         citizenship_number: clean(profileForm.citizenship_number),
-        pan_number:         clean(profileForm.pan_number),
-        nid_number:         clean(profileForm.nid_number),
-        ssid_number:        clean(profileForm.ssid_number),
+        spouse_name: clean(profileForm.spouse_name),
+        pan_number: clean(profileForm.pan_number),
+        nid_number: clean(profileForm.nid_number),
+        ssid_number: clean(profileForm.ssid_number),
       };
-      Object.keys(payload).forEach((k) => payload[k] === undefined && delete payload[k]);
+      Object.keys(payload).forEach(
+        (k) => payload[k] === undefined && delete payload[k],
+      );
 
       await apiClient.updatePersonalDetails(employee.id, payload);
-
-      // Refresh employee data
       try {
         const refreshed = await apiClient.getEmployees();
-        const allEmployees = (refreshed.data ?? []) as unknown as RawEmployeeRecord[];
-        const found = allEmployees.find((e: RawEmployeeRecord) => e.id === employee.id);
+        const allEmployees = (refreshed.data ??
+          []) as unknown as RawEmployeeRecord[];
+        const found = allEmployees.find(
+          (e: RawEmployeeRecord) => e.id === employee.id,
+        );
         if (found) {
           const normalized = normalizeEmployee(found as unknown as EmployeeAPI);
           setEmployee(normalized);
           setProfileForm(profileFromEmployee(normalized));
           const bank = bankFromEmployee(normalized);
-          setBankCommitted(bank); setBankDraft(bank);
+          setBankCommitted(bank);
+          setBankDraft(bank);
           const dept = deptFromEmployee(normalized);
-          setDeptCommitted(dept); setDeptDraft(dept);
+          setDeptCommitted(dept);
+          setDeptDraft(dept);
         }
       } catch {
         setEmployee((prev) =>
-          prev ? {
-            ...prev,
-            personal_details: {
-              ...prev.personal_details,
-              ...profileForm,
-              id: prev.personal_details?.id ?? "",
-              employee_id: employee.id,
-            },
-          } : prev
+          prev
+            ? {
+                ...prev,
+                personal_details: {
+                  ...prev.personal_details,
+                  ...profileForm,
+                  id: prev.personal_details?.id ?? "",
+                  employee_id: employee.id,
+                },
+              }
+            : prev,
         );
       }
 
       setEditing(false);
       setProfileErrors({});
       markChanged("profile");
-      toast({ title: "Profile updated", description: "Awaiting HR verification." });
+      toast({
+        title: "Profile updated",
+        description: "Awaiting HR verification.",
+      });
     } catch (err: unknown) {
-      const axiosErr = err as { response?: { data?: { errors?: Record<string, string[]> } } };
+      const axiosErr = err as {
+        response?: { data?: { errors?: Record<string, string[]> } };
+      };
       const apiErrors = axiosErr?.response?.data?.errors;
 
       if (apiErrors && typeof apiErrors === "object") {
@@ -657,25 +958,53 @@ export default function EmployeeSelfService() {
         }
       }
 
-      toast({ title: "Failed to save profile", description: errMsg(err), variant: "destructive" });
-    } finally { setSaving(false); }
+      toast({
+        title: "Failed to save profile",
+        description: errMsg(err),
+        variant: "destructive",
+      });
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleSaveBank = async () => {
     if (!employee?.id) return;
     try {
       setSaving(true);
-      await apiClient.upsertBankDetails(employee.id, bankDraft as unknown as Record<string, unknown>);
+      await apiClient.upsertBankDetails(
+        employee.id,
+        bankDraft as unknown as Record<string, unknown>,
+      );
       setBankCommitted({ ...bankDraft });
       setEmployee((prev) =>
-        prev ? { ...prev, bank_details: { ...prev.bank_details, ...bankDraft, id: prev.bank_details?.id ?? "", employee_id: employee.id } } : prev
+        prev
+          ? {
+              ...prev,
+              bank_details: {
+                ...prev.bank_details,
+                ...bankDraft,
+                id: prev.bank_details?.id ?? "",
+                employee_id: employee.id,
+              },
+            }
+          : prev,
       );
       setEditingBank(false);
       markChanged("bank");
-      toast({ title: "Bank details updated", description: "Awaiting HR verification." });
+      toast({
+        title: "Bank details updated",
+        description: "Awaiting HR verification.",
+      });
     } catch (err) {
-      toast({ title: "Failed to save bank details", description: errMsg(err), variant: "destructive" });
-    } finally { setSaving(false); }
+      toast({
+        title: "Failed to save bank details",
+        description: errMsg(err),
+        variant: "destructive",
+      });
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleSaveDept = async () => {
@@ -687,7 +1016,7 @@ export default function EmployeeSelfService() {
         department: {
           id: latestDept?.id,
           department_name: deptDraft.department_name,
-          designation: deptDraft.designation,
+          position: deptDraft.position,
           level: deptDraft.level,
           hierarchy: deptDraft.hierarchy,
           joining_date: deptDraft.joining_date,
@@ -698,10 +1027,19 @@ export default function EmployeeSelfService() {
       setDeptCommitted({ ...deptDraft });
       setEditingDept(false);
       markChanged("department");
-      toast({ title: "Department info updated", description: "Awaiting HR verification." });
+      toast({
+        title: "Department info updated",
+        description: "Awaiting HR verification.",
+      });
     } catch (err) {
-      toast({ title: "Failed to save department info", description: errMsg(err), variant: "destructive" });
-    } finally { setSaving(false); }
+      toast({
+        title: "Failed to save department info",
+        description: errMsg(err),
+        variant: "destructive",
+      });
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleApproveAll = async () => {
@@ -710,16 +1048,21 @@ export default function EmployeeSelfService() {
       setApprovingAll(true);
       const pendingDocs = documents.filter((d) => d.status === "Pending");
       const results = await Promise.allSettled([
-        changedSections.size > 0 ? apiClient.verifyEmployee(employee.id) : Promise.resolve(),
-        ...pendingDocs.map((doc) => apiClient.updateDocumentStatus(doc.id, "Verified")),
+        changedSections.size > 0
+          ? apiClient.verifyEmployee(employee.id)
+          : Promise.resolve(),
+        ...pendingDocs.map((doc) =>
+          apiClient.updateDocumentStatus(doc.id, "Verified"),
+        ),
       ]);
       const failures = results.filter((r) => r.status === "rejected");
       const verifyOk = results[0].status === "fulfilled";
       const approvedDocIds = new Set(
         pendingDocs
           .filter((_, i) => results[i + 1]?.status === "fulfilled")
-          .map((d) => d.id)
+          .map((d) => d.id),
       );
+<<<<<<< HEAD
 
       // ── FIX: clear localStorage on successful approval ───────────────────
       if (verifyOk) {
@@ -729,41 +1072,80 @@ export default function EmployeeSelfService() {
       }
       // ────────────────────────────────────────────────────────────────────
 
+=======
+      if (verifyOk) {
+        setHasUnverifiedChanges(false);
+        setChangedSections(new Set());
+      }
+>>>>>>> 400241aa6a8b8221a92fa80baa059e2a4bd016cc
       setDocuments((prev) =>
-        prev.map((d) => approvedDocIds.has(d.id) ? { ...d, status: "Verified" as const } : d)
+        prev.map((d) =>
+          approvedDocIds.has(d.id) ? { ...d, status: "Verified" as const } : d,
+        ),
       );
       if (failures.length > 0) {
-        toast({ title: `${failures.length} item(s) failed to approve`, description: "Some changes could not be verified. Please try again.", variant: "destructive" });
+        toast({
+          title: `${failures.length} item(s) failed to approve`,
+          description: "Some changes could not be verified. Please try again.",
+          variant: "destructive",
+        });
       } else {
         const parts: string[] = [];
-        if (changedSections.size > 0) parts.push(`${changedSections.size} section(s)`);
-        if (pendingDocs.length > 0) parts.push(`${pendingDocs.length} document(s)`);
-        toast({ title: "All changes approved", description: parts.length > 0 ? `Verified ${parts.join(" and ")}.` : "Nothing pending." });
+        if (changedSections.size > 0)
+          parts.push(`${changedSections.size} section(s)`);
+        if (pendingDocs.length > 0)
+          parts.push(`${pendingDocs.length} document(s)`);
+        toast({
+          title: "All changes approved",
+          description:
+            parts.length > 0
+              ? `Verified ${parts.join(" and ")}.`
+              : "Nothing pending.",
+        });
       }
     } catch (err) {
-      toast({ title: "Approval failed", description: errMsg(err), variant: "destructive" });
-    } finally { setApprovingAll(false); }
+      toast({
+        title: "Approval failed",
+        description: errMsg(err),
+        variant: "destructive",
+      });
+    } finally {
+      setApprovingAll(false);
+    }
   };
 
   const handleChangeStatus = async (s: string) => {
     if (!employee?.id) return;
     try {
       const latestDept = getLatestDepartment(employee.department);
-      await apiClient.updateEmployee(employee.id, { department: { id: latestDept?.id, employment_status: s } });
+      await apiClient.updateEmployee(employee.id, {
+        department: { id: latestDept?.id, employment_status: s },
+      });
       setEmpStatus(s);
       setDeptCommitted((p) => ({ ...p, employment_status: s }));
       setDeptDraft((p) => ({ ...p, employment_status: s }));
       setStatusDialog(false);
       toast({ title: `Status changed to ${s}` });
+      if (s === "notice_period") {
+        navigate("/offboarding");
+      }
     } catch (err) {
-      toast({ title: "Failed to update status", description: errMsg(err), variant: "destructive" });
+      toast({
+        title: "Failed to update status",
+        description: errMsg(err),
+        variant: "destructive",
+      });
     }
   };
 
   const handleUploadDoc = async () => {
     if (!selectedFile || !uploadDocType || !employee?.id) return;
     if (documents.some((doc) => doc.type === uploadDocType)) {
-      toast({ title: "Document already exists", description: `${uploadDocType} already uploaded.`, variant: "destructive" });
+      toast({
+        title: "Document already exists",
+        description: `${uploadDocType} already uploaded.`,
+        variant: "destructive",
+      });
       return;
     }
     const formData = new FormData();
@@ -779,8 +1161,14 @@ export default function EmployeeSelfService() {
       if (docFileInputRef.current) docFileInputRef.current.value = "";
       toast({ title: "Document uploaded" });
     } catch (err) {
-      toast({ title: "Upload failed", description: errMsg(err), variant: "destructive" });
-    } finally { setUploadingDoc(false); }
+      toast({
+        title: "Upload failed",
+        description: errMsg(err),
+        variant: "destructive",
+      });
+    } finally {
+      setUploadingDoc(false);
+    }
   };
 
   const handleDeleteDoc = async (docId: string) => {
@@ -788,30 +1176,49 @@ export default function EmployeeSelfService() {
       await apiClient.deleteDocument(docId);
       setDocuments((prev) => prev.filter((d) => d.id !== docId));
       toast({ title: "Document deleted successfully" });
-    } catch { toast({ title: "Delete failed" }); }
+    } catch {
+      toast({ title: "Delete failed" });
+    }
   };
 
   const handleAddContact = async () => {
     if (!newContact.name || !newContact.phone || !employee?.id) return;
     try {
       const res = await apiClient.addEmergencyContact(employee.id, newContact);
-      if (res.data) setEmergencyContacts((prev) => [...prev, res.data as EmergencyContact]);
+      if (res.data)
+        setEmergencyContacts((prev) => [...prev, res.data as EmergencyContact]);
       setNewContact({ name: "", relation: "", phone: "", email: "" });
       setAddContactDialog(false);
       toast({ title: "Contact added" });
     } catch (err) {
-      toast({ title: "Failed to add contact", description: errMsg(err), variant: "destructive" });
+      toast({
+        title: "Failed to add contact",
+        description: errMsg(err),
+        variant: "destructive",
+      });
     }
   };
 
   const handleUpdateContact = async (contactId: string) => {
     try {
-      const res = await apiClient.updateEmergencyContact(contactId, editContactData);
-      if (res.data) setEmergencyContacts((prev) => prev.map((c) => c.id === contactId ? (res.data as EmergencyContact) : c));
+      const res = await apiClient.updateEmergencyContact(
+        contactId,
+        editContactData,
+      );
+      if (res.data)
+        setEmergencyContacts((prev) =>
+          prev.map((c) =>
+            c.id === contactId ? (res.data as EmergencyContact) : c,
+          ),
+        );
       setEditingContactId(null);
       toast({ title: "Contact updated" });
     } catch (err) {
-      toast({ title: "Update failed", description: errMsg(err), variant: "destructive" });
+      toast({
+        title: "Update failed",
+        description: errMsg(err),
+        variant: "destructive",
+      });
     }
   };
 
@@ -821,7 +1228,11 @@ export default function EmployeeSelfService() {
       setEmergencyContacts((prev) => prev.filter((c) => c.id !== contactId));
       toast({ title: "Contact deleted" });
     } catch (err) {
-      toast({ title: "Delete failed", description: errMsg(err), variant: "destructive" });
+      toast({
+        title: "Delete failed",
+        description: errMsg(err),
+        variant: "destructive",
+      });
     }
   };
 
@@ -831,18 +1242,29 @@ export default function EmployeeSelfService() {
       setEmployeeAssets((prev) => prev.filter((a) => a.id !== assetId));
       toast({ title: "Asset returned" });
     } catch (err) {
-      toast({ title: "Failed to return asset", description: errMsg(err), variant: "destructive" });
+      toast({
+        title: "Failed to return asset",
+        description: errMsg(err),
+        variant: "destructive",
+      });
     }
   };
 
   const handleRequestAsset = () => {
     if (!assetRequest.type || !assetRequest.name) return;
-    setEmployeeAssets((prev) => [...prev, {
-      id: `A-${String(Date.now()).slice(-3)}`,
-      asset_id: `A-${String(Date.now()).slice(-3)}`,
-      name: assetRequest.name, category: assetRequest.type, serial_number: "—",
-      assigned_date: "—", purchase_date: "—", status: "Pending Approval",
-    } as AssetApi]);
+    setEmployeeAssets((prev) => [
+      ...prev,
+      {
+        id: `A-${String(Date.now()).slice(-3)}`,
+        asset_id: `A-${String(Date.now()).slice(-3)}`,
+        name: assetRequest.name,
+        category: assetRequest.type,
+        serial_number: "—",
+        assigned_date: "—",
+        purchase_date: "—",
+        status: "Pending Approval",
+      } as AssetApi,
+    ]);
     setAssetRequest({ type: "", name: "", reason: "" });
     setAssetRequestDialog(false);
     toast({ title: "Asset requested", description: "Pending HR approval." });
@@ -851,27 +1273,53 @@ export default function EmployeeSelfService() {
   const handleChangePassword = async () => {
     setPasswordError("");
     const { currentPassword, newPassword, confirmPassword } = passwordForm;
-    if (!currentPassword || !newPassword || !confirmPassword) { setPasswordError("All fields are required"); return; }
-    if (newPassword !== confirmPassword) { setPasswordError("New passwords do not match"); return; }
-    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
-    if (!passwordRegex.test(newPassword)) { setPasswordError("Password must be 8+ characters with uppercase, lowercase, number and special character"); return; }
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      setPasswordError("All fields are required");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordError("New passwords do not match");
+      return;
+    }
+    const passwordRegex =
+      /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
+    if (!passwordRegex.test(newPassword)) {
+      setPasswordError(
+        "Password must be 8+ characters with uppercase, lowercase, number and special character",
+      );
+      return;
+    }
     try {
       setChangingPassword(true);
-      await apiClient.changePassword({ currentPassword, newPassword, confirmPassword });
-      setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      await apiClient.changePassword({
+        currentPassword,
+        newPassword,
+        confirmPassword,
+      });
+      setPasswordForm({
+        currentPassword: "",
+        newPassword: "",
+        confirmPassword: "",
+      });
       toast({ title: "Password changed successfully!" });
     } catch (err) {
       setPasswordError(errMsg(err));
-    } finally { setChangingPassword(false); }
+    } finally {
+      setChangingPassword(false);
+    }
   };
 
   // ── Derived display values ────────────────────────────────────────────────
   const displayName =
     `${employee?.personal_details?.first_name ?? ""} ${employee?.personal_details?.last_name ?? ""}`.trim() ||
-    employee?.name || employee?.email || "—";
+    employee?.name ||
+    employee?.email ||
+    "—";
   const initials =
-    ((employee?.personal_details?.first_name?.[0] ?? "") + (employee?.personal_details?.last_name?.[0] ?? "")) ||
-    employee?.email?.[0]?.toUpperCase() || "E";
+    (employee?.personal_details?.first_name?.[0] ?? "") +
+      (employee?.personal_details?.last_name?.[0] ?? "") ||
+    employee?.email?.[0]?.toUpperCase() ||
+    "E";
 
   // ── Loading / empty states ────────────────────────────────────────────────
   if (loading) {
@@ -901,63 +1349,134 @@ export default function EmployeeSelfService() {
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <motion.div variants={containerVariant} initial="hidden" animate="show" className="space-y-4">
+    <motion.div
+      variants={containerVariant}
+      initial="hidden"
+      animate="show"
+      className="space-y-4"
+    >
       <motion.div variants={itemVariant}>
         <h1 className="text-lg font-semibold">My Profile</h1>
-        <p className="text-sm text-muted-foreground">Employee Self-Service Portal</p>
+        <p className="text-sm text-muted-foreground">
+          Employee Self-Service Portal
+        </p>
       </motion.div>
 
       {showApprovalBanner && (
-        <motion.div variants={itemVariant} className="flex items-center justify-between gap-4 px-4 py-3 rounded-xl border border-primary/20 bg-primary/5 dark:bg-primary/10 shadow-sm">
+        <motion.div
+          variants={itemVariant}
+          className="flex items-center justify-between gap-4 px-4 py-3 rounded-xl border border-primary/20 bg-primary/5 dark:bg-primary/10 shadow-sm"
+        >
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-primary/10 rounded-full"><ShieldCheck className="w-5 h-5 text-primary" /></div>
+            <div className="p-2 bg-primary/10 rounded-full">
+              <ShieldCheck className="w-5 h-5 text-primary" />
+            </div>
             <div>
               <p className="text-sm font-semibold">Review Required</p>
               <p className="text-xs text-muted-foreground">
                 {[
-                  changedSections.size > 0 && `${changedSections.size} section${changedSections.size > 1 ? "s" : ""} updated`,
-                  pendingDocCount > 0 && `${pendingDocCount} document${pendingDocCount > 1 ? "s" : ""} pending`,
-                ].filter(Boolean).join(" · ")} — click to approve all at once.
+                  changedSections.size > 0 &&
+                    `${changedSections.size} section${changedSections.size > 1 ? "s" : ""} updated`,
+                  pendingDocCount > 0 &&
+                    `${pendingDocCount} document${pendingDocCount > 1 ? "s" : ""} pending`,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}{" "}
+                — click to approve all at once.
               </p>
             </div>
           </div>
-          <Button size="sm" className="gap-2 px-4 shadow-sm press-effect shrink-0" disabled={approvingAll} onClick={handleApproveAll}>
-            {approvingAll ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckSquare className="w-4 h-4" />}
+          <Button
+            size="sm"
+            className="gap-2 px-4 shadow-sm press-effect shrink-0"
+            disabled={approvingAll}
+            onClick={handleApproveAll}
+          >
+            {approvingAll ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <CheckSquare className="w-4 h-4" />
+            )}
             Approve All Changes
           </Button>
         </motion.div>
       )}
 
       {/* ── Profile header card ── */}
-      <motion.div variants={itemVariant} className="bg-card border border-border rounded-lg p-5">
+      <motion.div
+        variants={itemVariant}
+        className="bg-card border border-border rounded-lg p-5"
+      >
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-4">
             <div className="w-16 h-16 rounded-xl bg-primary/10 flex items-center justify-center text-xl font-bold text-primary overflow-hidden">
-              {profileImage
-                ? <img src={profileImage} alt="Profile" className="w-full h-full object-cover" />
-                : <span>{editing ? ((profileForm.first_name[0] ?? "") + (profileForm.last_name[0] ?? "")) : initials}</span>}
+              {profileImage ? (
+                <img
+                  src={profileImage}
+                  alt="Profile"
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <span>
+                  {editing
+                    ? (profileForm.first_name[0] ?? "") +
+                      (profileForm.last_name[0] ?? "")
+                    : initials}
+                </span>
+              )}
             </div>
             {editing && (
               <div className="flex flex-col gap-2">
-                <input type="file" ref={fileInputRef} hidden accept="image/*" onChange={handleProfileUpload} />
-                <Button size="sm" variant="outline" disabled={uploading} onClick={() => fileInputRef.current?.click()} className="gap-1.5">
-                  {uploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />} Upload Image
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  hidden
+                  accept="image/*"
+                  onChange={handleProfileUpload}
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={uploading}
+                  onClick={() => fileInputRef.current?.click()}
+                  className="gap-1.5"
+                >
+                  {uploading ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Upload className="w-3.5 h-3.5" />
+                  )}{" "}
+                  Upload Image
                 </Button>
               </div>
             )}
             <div>
               <h2 className="font-semibold text-lg">
-                {editing ? `${profileForm.first_name} ${profileForm.last_name}`.trim() || "—" : displayName}
+                {editing
+                  ? `${profileForm.first_name} ${profileForm.last_name}`.trim() ||
+                    "—"
+                  : displayName}
               </h2>
-              <p className="text-sm text-muted-foreground">{deptCommitted.designation} · {deptCommitted.department_name}</p>
+              <p className="text-sm text-muted-foreground">
+                {deptCommitted.position} · {deptCommitted.department_name}
+              </p>
               <div className="flex items-center gap-3 mt-2">
-                <span className="text-xs font-mono-data text-muted-foreground">{employee.employee_id}</span>
-                <span className={`status-pill ${empStatusClass[empStatus] ?? "status-active"}`}>{empStatus}</span>
-                <span className="text-xs text-muted-foreground">{deptCommitted.employment_type}</span>
+                <span className="text-xs font-mono-data text-muted-foreground">
+                  {employee.employee_id}
+                </span>
+                <span
+                  className={`status-pill ${empStatusClass[empStatus] ?? "status-active"}`}
+                >
+                  {empStatus}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {deptCommitted.employment_type}
+                </span>
                 {isHR && (hasUnverifiedChanges || pendingDocCount > 0) && (
                   <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-400">
                     <ShieldAlert className="w-2.5 h-2.5" />
-                    {changedSections.size + (pendingDocCount > 0 ? 1 : 0)} pending
+                    {changedSections.size + (pendingDocCount > 0 ? 1 : 0)}{" "}
+                    pending
                   </span>
                 )}
               </div>
@@ -967,19 +1486,32 @@ export default function EmployeeSelfService() {
             {isHR && (
               <Dialog open={statusDialog} onOpenChange={setStatusDialog}>
                 <DialogTrigger asChild>
-                  <Button variant="outline" size="sm" className="gap-1.5 press-effect">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5 press-effect"
+                  >
                     <ChevronDown className="w-3.5 h-3.5" /> Change Status
                   </Button>
                 </DialogTrigger>
                 <DialogContent className="max-w-sm">
-                  <DialogHeader><DialogTitle>Change Employment Status</DialogTitle></DialogHeader>
+                  <DialogHeader>
+                    <DialogTitle>Change Employment Status</DialogTitle>
+                  </DialogHeader>
                   <div className="space-y-3 pt-2">
-                    {["Active", "On Leave", "Notice Period", "Resigned", "Inactive"].map((s) => (
-                      <button key={s} onClick={() => handleChangeStatus(s)}
-                        className={`w-full text-left px-4 py-3 rounded-lg border transition-colors ${empStatus === s ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50"}`}>
+                    {["active", "notice_period", "resigned"].map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => handleChangeStatus(s)}
+                        className={`w-full text-left px-4 py-3 rounded-lg border transition-colors ${empStatus === s ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50"}`}
+                      >
                         <div className="flex items-center justify-between">
-                          <span className="text-sm font-medium">{s}</span>
-                          <span className={`status-pill ${empStatusClass[s]}`}>{s}</span>
+                          <span className="text-sm font-medium capitalize">
+                            {s}
+                          </span>
+                          <span className={`status-pill ${empStatusClass[s]}`}>
+                            {s}
+                          </span>
                         </div>
                       </button>
                     ))}
@@ -987,17 +1519,40 @@ export default function EmployeeSelfService() {
                 </DialogContent>
               </Dialog>
             )}
-            <Button variant="outline" size="sm" className="gap-1.5 press-effect" disabled={saving}
-              onClick={editing ? handleSaveProfile : () => { setProfileForm(profileFromEmployee(employee)); setEditing(true); }}>
-              {saving && editing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : editing ? <Save className="w-3.5 h-3.5" /> : <Edit2 className="w-3.5 h-3.5" />}
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5 press-effect"
+              disabled={saving}
+              onClick={
+                editing
+                  ? handleSaveProfile
+                  : () => {
+                      setProfileForm(profileFromEmployee(employee));
+                      setEditing(true);
+                    }
+              }
+            >
+              {saving && editing ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : editing ? (
+                <Save className="w-3.5 h-3.5" />
+              ) : (
+                <Edit2 className="w-3.5 h-3.5" />
+              )}
               {editing ? "Save" : "Edit Profile"}
             </Button>
             {editing && (
-              <Button variant="ghost" size="sm" className="press-effect" onClick={() => {
-                setProfileForm(profileFromEmployee(employee));
-                setProfileErrors({});
-                setEditing(false);
-              }}>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="press-effect"
+                onClick={() => {
+                  setProfileForm(profileFromEmployee(employee));
+                  setProfileErrors({});
+                  setEditing(false);
+                }}
+              >
                 <X className="w-3.5 h-3.5" /> Cancel
               </Button>
             )}
@@ -1007,20 +1562,69 @@ export default function EmployeeSelfService() {
 
       {/* ── Tabs ── */}
       <motion.div variants={itemVariant}>
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+        <Tabs
+          value={activeTab}
+          onValueChange={setActiveTab}
+          className="space-y-4"
+        >
           <TabsList className="bg-muted/50 border border-border p-1 h-auto flex-wrap">
-            {([
-              { value: "profile",    icon: User,         label: "Personal",     section: "profile"     as Section | null },
-              { value: "documents",  icon: FileText,     label: "Documents",    section: null },
-              { value: "leave",      icon: CalendarDays, label: "Leaves",       section: null },
-              { value: "emergency",  icon: Phone,        label: "Emergency",    section: null },
-              { value: "bank",       icon: CreditCard,   label: "Bank Details", section: "bank"        as Section | null },
-              { value: "department", icon: Building2,    label: "Department",   section: "department"  as Section | null },
-              { value: "assets",     icon: Package,      label: "Assets",       section: null },
-              { value: "security",   icon: KeyRound,     label: "Security",     section: null },
-            ] as const).map((t) => (
-              <TabsTrigger key={t.value} value={t.value}
-                className="gap-1.5 text-xs data-[state=active]:bg-card data-[state=active]:shadow-sm relative">
+            {(
+              [
+                {
+                  value: "profile",
+                  icon: User,
+                  label: "Personal",
+                  section: "profile" as Section | null,
+                },
+                {
+                  value: "documents",
+                  icon: FileText,
+                  label: "Documents",
+                  section: null,
+                },
+                {
+                  value: "leave",
+                  icon: CalendarDays,
+                  label: "Leaves",
+                  section: null,
+                },
+                {
+                  value: "emergency",
+                  icon: Phone,
+                  label: "Emergency",
+                  section: null,
+                },
+                {
+                  value: "bank",
+                  icon: CreditCard,
+                  label: "Bank Details",
+                  section: "bank" as Section | null,
+                },
+                {
+                  value: "department",
+                  icon: Building2,
+                  label: "Department",
+                  section: "department" as Section | null,
+                },
+                {
+                  value: "assets",
+                  icon: Package,
+                  label: "Assets",
+                  section: null,
+                },
+                {
+                  value: "security",
+                  icon: KeyRound,
+                  label: "Security",
+                  section: null,
+                },
+              ] as const
+            ).map((t) => (
+              <TabsTrigger
+                key={t.value}
+                value={t.value}
+                className="gap-1.5 text-xs data-[state=active]:bg-card data-[state=active]:shadow-sm relative"
+              >
                 <t.icon className="w-3.5 h-3.5" />
                 {t.label}
                 {isHR && t.section && changedSections.has(t.section) && (
@@ -1029,16 +1633,22 @@ export default function EmployeeSelfService() {
                 {isHR && t.value === "documents" && pendingDocCount > 0 && (
                   <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-amber-500" />
                 )}
-                {t.value === "profile" && editing && Object.keys(profileErrors).length > 0 && (
-                  <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-destructive" />
-                )}
+                {t.value === "profile" &&
+                  editing &&
+                  Object.keys(profileErrors).length > 0 && (
+                    <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-destructive" />
+                  )}
               </TabsTrigger>
             ))}
           </TabsList>
 
           {/* ══ Personal ══ */}
           <TabsContent value="profile" className="space-y-4">
+<<<<<<< HEAD
 
+=======
+            {/* Validation error summary banner */}
+>>>>>>> 400241aa6a8b8221a92fa80baa059e2a4bd016cc
             {editing && Object.keys(profileErrors).length > 0 && (
               <motion.div
                 initial={{ opacity: 0, y: -8 }}
@@ -1048,11 +1658,17 @@ export default function EmployeeSelfService() {
                 <AlertCircle className="w-4 h-4 text-destructive shrink-0 mt-0.5" />
                 <div>
                   <p className="text-sm font-semibold text-destructive">
-                    {Object.keys(profileErrors).length} field{Object.keys(profileErrors).length > 1 ? "s" : ""} need{Object.keys(profileErrors).length === 1 ? "s" : ""} attention
+                    {Object.keys(profileErrors).length} field
+                    {Object.keys(profileErrors).length > 1 ? "s" : ""} need
+                    {Object.keys(profileErrors).length === 1 ? "s" : ""}{" "}
+                    attention
                   </p>
                   <ul className="mt-1 space-y-0.5">
                     {Object.entries(profileErrors).map(([field, message]) => (
-                      <li key={field} className="text-xs text-destructive/80 flex items-center gap-1">
+                      <li
+                        key={field}
+                        className="text-xs text-destructive/80 flex items-center gap-1"
+                      >
                         <span className="w-1 h-1 rounded-full bg-destructive/60 shrink-0" />
                         {message}
                       </li>
@@ -1063,56 +1679,109 @@ export default function EmployeeSelfService() {
             )}
 
             <div className="bg-card border border-border rounded-lg p-5">
-              <h3 className="text-sm font-semibold mb-4">Personal Information</h3>
+              <h3 className="text-sm font-semibold mb-4">
+                Personal Information
+              </h3>
               <div className="grid grid-cols-3 gap-4">
-                {([
-                  { label: "First Name",         key: "first_name",         required: true },
-                  { label: "Last Name",          key: "last_name",          required: true },
-                  { label: "Email",              key: "email",              required: true },
-                  { label: "Phone",              key: "phone",              mono: true },
-                  { label: "Date of Birth",      key: "date_of_birth",      mono: true },
-                  { label: "Citizenship Number", key: "citizenship_number" },
-                  { label: "PAN Number",         key: "pan_number" },
-                  { label: "NID Number",         key: "nid_number" },
-                  { label: "SSF SSID",           key: "ssid_number" },
-                ] as { label: string; key: keyof ProfileFormData; mono?: boolean; required?: boolean }[]).map((f) => (
+                {(
+                  [
+                    { label: "First Name", key: "first_name", required: true },
+                    { label: "Last Name", key: "last_name", required: true },
+                    { label: "Email", key: "email", required: true },
+                    { label: "Phone", key: "phone", mono: true },
+                    {
+                      label: "Date of Birth",
+                      key: "date_of_birth",
+                      mono: true,
+                    },
+                    { label: "Citizenship Number", key: "citizenship_number" },
+                    { label: "PAN Number", key: "pan_number" },
+                    { label: "NID Number", key: "nid_number" },
+                    { label: "SSF SSID", key: "ssid_number" },
+                  ] as {
+                    label: string;
+                    key: keyof ProfileFormData;
+                    mono?: boolean;
+                    required?: boolean;
+                  }[]
+                ).map((f) => (
                   <div key={f.key}>
                     <p className="text-xs text-muted-foreground mb-1">
-                      {f.label}{f.required && <span className="text-destructive ml-0.5">*</span>}
+                      {f.label}
+                      {f.required && (
+                        <span className="text-destructive ml-0.5">*</span>
+                      )}
                     </p>
                     {editing ? (
                       <>
                         <Input
                           type={f.key === "date_of_birth" ? "date" : "text"}
                           value={profileForm[f.key] ?? ""}
-                          onChange={(e) => { setProfileForm((p) => ({ ...p, [f.key]: e.target.value })); clearError(f.key); }}
+                          onChange={(e) => {
+                            setProfileForm((p) => ({
+                              ...p,
+                              [f.key]: e.target.value,
+                            }));
+                            clearError(f.key);
+                          }}
                           className={`h-8 text-sm transition-colors ${profileErrors[f.key] ? "border-destructive focus-visible:ring-destructive/30 bg-destructive/5" : ""}`}
                         />
                         <FieldError message={profileErrors[f.key]} />
                       </>
                     ) : (
-                      <p className={`text-sm ${f.mono ? "font-mono-data" : ""}`}>{profileForm[f.key] || "—"}</p>
+                      <p
+                        className={`text-sm ${f.mono ? "font-mono-data" : ""}`}
+                      >
+                        {profileForm[f.key] || "—"}
+                      </p>
                     )}
                   </div>
                 ))}
 
-                {([
-                  { label: "Gender",         key: "gender",         options: ["Female", "Male", "Others"],                 placeholder: "Select gender" },
-                  { label: "Marital Status", key: "marital_status", options: ["Single", "Married", "Divorced", "Widowed"], placeholder: "Select marital status" },
-                ] as const).map((field) => (
+                {(
+                  [
+                    {
+                      label: "Gender",
+                      key: "gender",
+                      options: ["Female", "Male", "Others"],
+                      placeholder: "Select gender",
+                    },
+                    {
+                      label: "Marital Status",
+                      key: "marital_status",
+                      options: ["Single", "Married", "Divorced", "Widowed"],
+                      placeholder: "Select marital status",
+                    },
+                  ] as const
+                ).map((field) => (
                   <div key={field.key}>
-                    <p className="text-xs text-muted-foreground mb-1">{field.label}</p>
+                    <p className="text-xs text-muted-foreground mb-1">
+                      {field.label}
+                    </p>
                     {editing ? (
                       <>
                         <Select
                           value={profileForm[field.key] ?? ""}
-                          onValueChange={(v) => { setProfileForm((p) => ({ ...p, [field.key]: v })); clearError(field.key); }}
+                          onValueChange={(v) => {
+                            setProfileForm((p) => ({ ...p, [field.key]: v }));
+                            clearError(field.key);
+                          }}
                         >
-                          <SelectTrigger className={`h-8 text-xs transition-colors ${profileErrors[field.key] ? "border-destructive focus-visible:ring-destructive/30 bg-destructive/5" : ""}`}>
+                          <SelectTrigger
+                            className={`h-8 text-xs transition-colors ${profileErrors[field.key] ? "border-destructive focus-visible:ring-destructive/30 bg-destructive/5" : ""}`}
+                          >
                             <SelectValue placeholder={field.placeholder} />
                           </SelectTrigger>
                           <SelectContent>
-                            {field.options.map((opt) => <SelectItem key={opt} value={opt} className="text-xs">{opt}</SelectItem>)}
+                            {field.options.map((opt) => (
+                              <SelectItem
+                                key={opt}
+                                value={opt}
+                                className="text-xs"
+                              >
+                                {opt}
+                              </SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
                         <FieldError message={profileErrors[field.key]} />
@@ -1128,18 +1797,37 @@ export default function EmployeeSelfService() {
             <div className="bg-card border border-border rounded-lg p-5">
               <h3 className="text-sm font-semibold mb-4">Family Details</h3>
               <div className="grid grid-cols-3 gap-4">
-                {([
-                  { label: "Father's Name",      key: "father_name" },
-                  { label: "Grandfather's Name", key: "grandfather_name" },
-                  { label: "Mother's Name",      key: "mother_name" },
-                ] as { label: string; key: keyof ProfileFormData }[]).map((f) => (
+                {(
+                  [
+                    { label: "Father's Name", key: "father_name" },
+                    { label: "Grandfather's Name", key: "grandfather_name" },
+                    { label: "Mother's Name", key: "mother_name" },
+                    ...(profileForm.marital_status === "Married" ||
+                    (!editing && profileForm.spouse_name)
+                      ? [
+                          {
+                            label: "Spouse's Name",
+                            key: "spouse_name" as keyof ProfileFormData,
+                          },
+                        ]
+                      : []),
+                  ] as { label: string; key: keyof ProfileFormData }[]
+                ).map((f) => (
                   <div key={f.key}>
-                    <p className="text-xs text-muted-foreground mb-1">{f.label}</p>
+                    <p className="text-xs text-muted-foreground mb-1">
+                      {f.label}
+                    </p>
                     {editing ? (
                       <>
                         <Input
                           value={profileForm[f.key] ?? ""}
-                          onChange={(e) => { setProfileForm((p) => ({ ...p, [f.key]: e.target.value })); clearError(f.key); }}
+                          onChange={(e) => {
+                            setProfileForm((p) => ({
+                              ...p,
+                              [f.key]: e.target.value,
+                            }));
+                            clearError(f.key);
+                          }}
                           className={`h-8 text-sm transition-colors ${profileErrors[f.key] ? "border-destructive focus-visible:ring-destructive/30 bg-destructive/5" : ""}`}
                         />
                         <FieldError message={profileErrors[f.key]} />
@@ -1155,17 +1843,27 @@ export default function EmployeeSelfService() {
             <div className="bg-card border border-border rounded-lg p-5">
               <h3 className="text-sm font-semibold mb-4">Address</h3>
               <div className="grid grid-cols-2 gap-4">
-                {([
-                  { label: "Current Address",   key: "current_address" },
-                  { label: "Permanent Address", key: "permanent_address" },
-                ] as { label: string; key: keyof ProfileFormData }[]).map((f) => (
+                {(
+                  [
+                    { label: "Current Address", key: "current_address" },
+                    { label: "Permanent Address", key: "permanent_address" },
+                  ] as { label: string; key: keyof ProfileFormData }[]
+                ).map((f) => (
                   <div key={f.key}>
-                    <p className="text-xs text-muted-foreground mb-1">{f.label}</p>
+                    <p className="text-xs text-muted-foreground mb-1">
+                      {f.label}
+                    </p>
                     {editing ? (
                       <>
                         <Input
                           value={profileForm[f.key] ?? ""}
-                          onChange={(e) => { setProfileForm((p) => ({ ...p, [f.key]: e.target.value })); clearError(f.key); }}
+                          onChange={(e) => {
+                            setProfileForm((p) => ({
+                              ...p,
+                              [f.key]: e.target.value,
+                            }));
+                            clearError(f.key);
+                          }}
                           className={`h-8 text-sm transition-colors ${profileErrors[f.key] ? "border-destructive focus-visible:ring-destructive/30 bg-destructive/5" : ""}`}
                         />
                         <FieldError message={profileErrors[f.key]} />
@@ -1184,57 +1882,159 @@ export default function EmployeeSelfService() {
             <div className="bg-card border border-border rounded-lg">
               <div className="px-5 py-3 border-b border-border">
                 <h3 className="text-sm font-semibold">Documents</h3>
-                <p className="text-xs text-muted-foreground mt-0.5">Citizenship, PAN, certificates, NID, police report, SSF</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Citizenship, PAN, certificates, NID, police report, SSF
+                </p>
               </div>
               <div className="px-5 py-4 border-b border-border space-y-3">
                 <div className="flex items-center gap-2">
-                  <Select value={uploadDocType} onValueChange={setUploadDocType}>
-                    <SelectTrigger className="w-48 h-8 text-xs"><SelectValue placeholder="Select document type *" /></SelectTrigger>
-                    <SelectContent>{documentTypes.map((t) => <SelectItem key={t} value={t} className="text-xs">{t}</SelectItem>)}</SelectContent>
+                  <Select
+                    value={uploadDocType}
+                    onValueChange={setUploadDocType}
+                  >
+                    <SelectTrigger className="w-48 h-8 text-xs">
+                      <SelectValue placeholder="Select document type *" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {[
+                        ...documentTypes.filter(
+                          (t) => t !== "Marriage Certificate",
+                        ),
+                        ...(profileForm.marital_status === "Married"
+                          ? ["Marriage Certificate"]
+                          : []),
+                      ].map((t) => (
+                        <SelectItem key={t} value={t} className="text-xs">
+                          {t}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
                   </Select>
-                  {!uploadDocType && <span className="text-xs text-amber-600 dark:text-amber-400">← Choose a type before uploading</span>}
+                  {!uploadDocType && (
+                    <span className="text-xs text-amber-600 dark:text-amber-400">
+                      ← Choose a type before uploading
+                    </span>
+                  )}
                 </div>
                 <div
-                  onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setIsDragging(true);
+                  }}
                   onDragLeave={() => setIsDragging(false)}
-                  onDrop={(e) => { e.preventDefault(); setIsDragging(false); const f = Array.from(e.dataTransfer.files)[0]; if (f) setSelectedFile(f); }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setIsDragging(false);
+                    const f = Array.from(e.dataTransfer.files)[0];
+                    if (f) setSelectedFile(f);
+                  }}
                   className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${isDragging ? "border-primary bg-primary/5" : uploadDocType ? "border-border hover:border-primary/50" : "border-border opacity-60 cursor-not-allowed"}`}
-                  onClick={() => uploadDocType && docFileInputRef.current?.click()}
+                  onClick={() =>
+                    uploadDocType && docFileInputRef.current?.click()
+                  }
                 >
                   <Upload className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
-                  <p className="text-sm text-muted-foreground">{uploadDocType ? "Drag & drop files here, or click to browse" : "Select a document type above first"}</p>
-                  {selectedFile && <p className="text-xs text-primary mt-1 font-medium">{selectedFile.name}</p>}
-                  <div className="flex items-center gap-2 justify-center mt-3" onClick={(e) => e.stopPropagation()}>
-                    <input type="file" ref={docFileInputRef} onChange={(e) => setSelectedFile(e.target.files?.[0] ?? null)} className="hidden" />
-                    <Button size="sm" className="h-8 text-xs gap-1" disabled={!selectedFile || !uploadDocType || uploadingDoc} onClick={handleUploadDoc}>
-                      {uploadingDoc ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />} Upload
+                  <p className="text-sm text-muted-foreground">
+                    {uploadDocType
+                      ? "Drag & drop files here, or click to browse"
+                      : "Select a document type above first"}
+                  </p>
+                  {selectedFile && (
+                    <p className="text-xs text-primary mt-1 font-medium">
+                      {selectedFile.name}
+                    </p>
+                  )}
+                  <div
+                    className="flex items-center gap-2 justify-center mt-3"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <input
+                      type="file"
+                      ref={docFileInputRef}
+                      onChange={(e) =>
+                        setSelectedFile(e.target.files?.[0] ?? null)
+                      }
+                      className="hidden"
+                    />
+                    <Button
+                      size="sm"
+                      className="h-8 text-xs gap-1"
+                      disabled={!selectedFile || !uploadDocType || uploadingDoc}
+                      onClick={handleUploadDoc}
+                    >
+                      {uploadingDoc ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <Upload className="w-3 h-3" />
+                      )}{" "}
+                      Upload
                     </Button>
                   </div>
                 </div>
               </div>
               <table className="nexus-table">
                 <thead>
-                  <tr><th>Document</th><th>Type</th><th>Size</th><th>Uploaded</th><th>Status</th><th className="w-10"></th></tr>
+                  <tr>
+                    <th>Document</th>
+                    <th>Type</th>
+                    <th>Size</th>
+                    <th>Uploaded</th>
+                    <th>Status</th>
+                    <th className="w-10"></th>
+                  </tr>
                 </thead>
                 <tbody>
                   {documents.length === 0 && (
-                    <tr><td colSpan={6} className="text-center text-sm text-muted-foreground py-6">No documents uploaded yet.</td></tr>
+                    <tr>
+                      <td
+                        colSpan={6}
+                        className="text-center text-sm text-muted-foreground py-6"
+                      >
+                        No documents uploaded yet.
+                      </td>
+                    </tr>
                   )}
                   {documents.map((doc, idx) => (
                     <tr key={doc.id ?? idx}>
-                      <td><div className="flex items-center gap-2"><FileText className="w-4 h-4 text-muted-foreground shrink-0" /><span className="text-sm">{doc.name}</span></div></td>
-                      <td className="text-xs text-muted-foreground">{doc.type}</td>
-                      <td className="text-xs font-mono-data text-muted-foreground">{doc.file_size}</td>
-                      <td className="text-xs font-mono-data text-muted-foreground">{toDateStr(doc.uploaded_at)}</td>
                       <td>
-                        <span className={`status-pill ${docStatusClass[doc.status]}`}>
-                          {doc.status === "Verified" && <Check className="w-3 h-3 mr-1" />}
-                          {doc.status === "Pending" && <AlertCircle className="w-3 h-3 mr-1" />}
-                          {doc.status === "Rejected" && <X className="w-3 h-3 mr-1" />}
+                        <div className="flex items-center gap-2">
+                          <FileText className="w-4 h-4 text-muted-foreground shrink-0" />
+                          <span className="text-sm">{doc.name}</span>
+                        </div>
+                      </td>
+                      <td className="text-xs text-muted-foreground">
+                        {doc.type}
+                      </td>
+                      <td className="text-xs font-mono-data text-muted-foreground">
+                        {doc.file_size}
+                      </td>
+                      <td className="text-xs font-mono-data text-muted-foreground">
+                        {toDateStr(doc.uploaded_at)}
+                      </td>
+                      <td>
+                        <span
+                          className={`status-pill ${docStatusClass[doc.status]}`}
+                        >
+                          {doc.status === "Verified" && (
+                            <Check className="w-3 h-3 mr-1" />
+                          )}
+                          {doc.status === "Pending" && (
+                            <AlertCircle className="w-3 h-3 mr-1" />
+                          )}
+                          {doc.status === "Rejected" && (
+                            <X className="w-3 h-3 mr-1" />
+                          )}
                           {doc.status}
                         </span>
                       </td>
-                      <td><button onClick={() => handleDeleteDoc(doc.id)} className="p-1 rounded hover:bg-destructive/10"><Trash2 className="w-3.5 h-3.5 text-destructive" /></button></td>
+                      <td>
+                        <button
+                          onClick={() => handleDeleteDoc(doc.id)}
+                          className="p-1 rounded hover:bg-destructive/10"
+                        >
+                          <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -1245,28 +2045,54 @@ export default function EmployeeSelfService() {
           {/* ══ Leaves ══ */}
           <TabsContent value="leave" className="space-y-6">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-              {leaveBalance?.length > 0 ? leaveBalance.map((lb, idx) => {
-                const percentage = lb.total ? Math.round((lb.used / lb.total) * 100) : 0;
-                const Icon = leaveTypeIcons[lb.leave_type_id] ?? Briefcase;
-                return (
-                  <div key={lb.leave_type_id ?? lb.id ?? idx} className="group relative bg-card border border-border rounded-xl p-5 hover:shadow-md hover:border-primary/40 transition-all duration-300">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-2">
-                        <div className="p-2 rounded-md bg-primary/10 text-primary"><Icon className="w-4 h-4" /></div>
-                        <p className="text-sm font-semibold">{enumToLeaveType[lb.leave_type_id] ?? lb.leave_type_id}</p>
+              {leaveBalance?.length > 0 ? (
+                leaveBalance.map((lb, idx) => {
+                  const percentage = lb.total
+                    ? Math.round((lb.used / lb.total) * 100)
+                    : 0;
+                  const Icon = leaveTypeIcons[lb.leave_type] ?? Briefcase;
+                  return (
+                    <div
+                      key={lb.leave_type_id ?? lb.id ?? idx}
+                      className="group relative bg-card border border-border rounded-xl p-5 hover:shadow-md hover:border-primary/40 transition-all duration-300"
+                    >
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          <div className="p-2 rounded-md bg-primary/10 text-primary">
+                            <Icon className="w-4 h-4" />
+                          </div>
+                          <p className="text-sm font-semibold">
+                            {enumToLeaveType[lb.leave_type] ?? lb.leave_type}
+                          </p>
+                        </div>
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary">
+                          {percentage}%
+                        </span>
                       </div>
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary">{percentage}%</span>
+                      <p className="text-2xl font-bold tracking-tight mb-3">
+                        {lb.remaining}
+                        <span className="text-sm font-normal text-muted-foreground ml-1">
+                          days left
+                        </span>
+                      </p>
+                      <div className="flex justify-between text-xs text-muted-foreground mb-3">
+                        <span>Used: {lb.used}</span>
+                        <span>Total: {lb.total}</span>
+                      </div>
+                      <div className="h-2 bg-muted rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all duration-500 ${percentage > 80 ? "bg-red-500" : percentage > 60 ? "bg-amber-500" : "bg-primary"}`}
+                          style={{ width: `${percentage}%` }}
+                        />
+                      </div>
                     </div>
-                    <p className="text-2xl font-bold tracking-tight mb-3">{lb.remaining}<span className="text-sm font-normal text-muted-foreground ml-1">days left</span></p>
-                    <div className="flex justify-between text-xs text-muted-foreground mb-3"><span>Used: {lb.used}</span><span>Total: {lb.total}</span></div>
-                    <div className="h-2 bg-muted rounded-full overflow-hidden">
-                      <div className={`h-full rounded-full transition-all duration-500 ${percentage > 80 ? "bg-red-500" : percentage > 60 ? "bg-amber-500" : "bg-primary"}`} style={{ width: `${percentage}%` }} />
-                    </div>
-                  </div>
-                );
-              }) : (
+                  );
+                })
+              ) : (
                 <div className="col-span-full py-12 text-center border-2 border-dashed border-border rounded-xl">
-                  <p className="text-sm text-muted-foreground">No leave records found.</p>
+                  <p className="text-sm text-muted-foreground">
+                    No leave records found.
+                  </p>
                 </div>
               )}
             </div>
@@ -1277,24 +2103,63 @@ export default function EmployeeSelfService() {
             <div className="bg-card border border-border rounded-lg">
               <div className="px-5 py-3 border-b border-border flex items-center justify-between">
                 <h3 className="text-sm font-semibold">Emergency Contacts</h3>
-                <Dialog open={addContactDialog} onOpenChange={setAddContactDialog}>
+                <Dialog
+                  open={addContactDialog}
+                  onOpenChange={setAddContactDialog}
+                >
                   <DialogTrigger asChild>
-                    <Button size="sm" variant="outline" className="gap-1.5 press-effect"><Plus className="w-3.5 h-3.5" /> Add Contact</Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="gap-1.5 press-effect"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Add Contact
+                    </Button>
                   </DialogTrigger>
                   <DialogContent className="max-w-md">
-                    <DialogHeader><DialogTitle>Add Emergency Contact</DialogTitle></DialogHeader>
+                    <DialogHeader>
+                      <DialogTitle>Add Emergency Contact</DialogTitle>
+                    </DialogHeader>
                     <div className="space-y-3 pt-2">
                       <div className="grid grid-cols-2 gap-3">
-                        {([{ label: "Name *", key: "name" }, { label: "Relation", key: "relation" }, { label: "Phone *", key: "phone" }, { label: "Email", key: "email" }] as const).map((f) => (
+                        {(
+                          [
+                            { label: "Name *", key: "name" },
+                            { label: "Relation", key: "relation" },
+                            { label: "Phone *", key: "phone" },
+                            { label: "Email", key: "email" },
+                          ] as const
+                        ).map((f) => (
                           <div key={f.key}>
-                            <label className="text-xs text-muted-foreground mb-1 block">{f.label}</label>
-                            <Input value={(newContact as Record<string, string>)[f.key]} onChange={(e) => setNewContact({ ...newContact, [f.key]: e.target.value })} className="h-8 text-sm" />
+                            <label className="text-xs text-muted-foreground mb-1 block">
+                              {f.label}
+                            </label>
+                            <Input
+                              value={
+                                (newContact as Record<string, string>)[f.key]
+                              }
+                              onChange={(e) =>
+                                setNewContact({
+                                  ...newContact,
+                                  [f.key]: e.target.value,
+                                })
+                              }
+                              className="h-8 text-sm"
+                            />
                           </div>
                         ))}
                       </div>
                       <div className="flex justify-end gap-2">
-                        <Button variant="outline" size="sm" onClick={() => setAddContactDialog(false)}>Cancel</Button>
-                        <Button size="sm" onClick={handleAddContact}>Add Contact</Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setAddContactDialog(false)}
+                        >
+                          Cancel
+                        </Button>
+                        <Button size="sm" onClick={handleAddContact}>
+                          Add Contact
+                        </Button>
                       </div>
                     </div>
                   </DialogContent>
@@ -1302,36 +2167,99 @@ export default function EmployeeSelfService() {
               </div>
               <div className="divide-y divide-border">
                 {emergencyContacts.length === 0 && (
-                  <p className="px-5 py-6 text-sm text-muted-foreground text-center">No emergency contacts added yet.</p>
+                  <p className="px-5 py-6 text-sm text-muted-foreground text-center">
+                    No emergency contacts added yet.
+                  </p>
                 )}
                 {emergencyContacts.map((contact, idx) => (
                   <div key={contact.id ?? idx} className="px-5 py-4">
                     {editingContactId === contact.id ? (
                       <div className="grid grid-cols-4 gap-2 items-end">
                         {(["name", "relation", "phone"] as const).map((key) => (
-                          <Input key={key} value={editContactData[key]} onChange={(e) => setEditContactData({ ...editContactData, [key]: e.target.value })} className="h-8 text-sm" placeholder={key.charAt(0).toUpperCase() + key.slice(1)} />
+                          <Input
+                            key={key}
+                            value={editContactData[key]}
+                            onChange={(e) =>
+                              setEditContactData({
+                                ...editContactData,
+                                [key]: e.target.value,
+                              })
+                            }
+                            className="h-8 text-sm"
+                            placeholder={
+                              key.charAt(0).toUpperCase() + key.slice(1)
+                            }
+                          />
                         ))}
                         <div className="flex gap-1">
-                          <Button size="sm" className="h-8" onClick={() => handleUpdateContact(contact.id)}><Save className="w-3 h-3" /></Button>
-                          <Button variant="outline" size="sm" className="h-8" onClick={() => setEditingContactId(null)}><X className="w-3 h-3" /></Button>
+                          <Button
+                            size="sm"
+                            className="h-8"
+                            onClick={() => handleUpdateContact(contact.id)}
+                          >
+                            <Save className="w-3 h-3" />
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-8"
+                            onClick={() => setEditingContactId(null)}
+                          >
+                            <X className="w-3 h-3" />
+                          </Button>
                         </div>
                       </div>
                     ) : (
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-4">
                           <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center text-sm font-medium text-muted-foreground">
-                            {contact.name.split(" ").map((n) => n[0]).join("")}
+                            {contact.name
+                              .split(" ")
+                              .map((n) => n[0])
+                              .join("")}
                           </div>
                           <div>
-                            <p className="text-sm font-medium">{contact.name}</p>
-                            <p className="text-xs text-muted-foreground">{contact.relation}</p>
+                            <p className="text-sm font-medium">
+                              {contact.name}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {contact.relation}
+                            </p>
                           </div>
                         </div>
                         <div className="flex items-center gap-4">
-                          <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><Phone className="w-3.5 h-3.5" /><span className="font-mono-data">{contact.phone}</span></div>
-                          <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><Mail className="w-3.5 h-3.5" /><span>{contact.email}</span></div>
-                          <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => { setEditingContactId(contact.id); setEditContactData({ name: contact.name, relation: contact.relation, phone: contact.phone, email: contact.email ?? "" }); }}><Edit2 className="w-3.5 h-3.5" /></Button>
-                          <button onClick={() => handleDeleteContact(contact.id)} className="p-1 rounded hover:bg-destructive/10"><Trash2 className="w-3.5 h-3.5 text-destructive" /></button>
+                          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                            <Phone className="w-3.5 h-3.5" />
+                            <span className="font-mono-data">
+                              {contact.phone}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                            <Mail className="w-3.5 h-3.5" />
+                            <span>{contact.email}</span>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2"
+                            onClick={() => {
+                              setEditingContactId(contact.id);
+                              setEditContactData({
+                                name: contact.name,
+                                relation: contact.relation,
+                                phone: contact.phone,
+                                email: contact.email ?? "",
+                              });
+                            }}
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </Button>
+                          <button
+                            onClick={() => handleDeleteContact(contact.id)}
+                            className="p-1 rounded hover:bg-destructive/10"
+                          >
+                            <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                          </button>
                         </div>
                       </div>
                     )}
@@ -1345,33 +2273,89 @@ export default function EmployeeSelfService() {
           <TabsContent value="bank" className="space-y-4">
             <div className="bg-card border border-border rounded-lg p-5">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-semibold">Bank & Salary Information</h3>
+                <h3 className="text-sm font-semibold">
+                  Bank & Salary Information
+                </h3>
                 <div className="flex gap-2">
                   {editingBank && (
-                    <Button variant="ghost" size="sm" className="press-effect" onClick={() => { setBankDraft({ ...bankCommitted }); setEditingBank(false); }}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="press-effect"
+                      onClick={() => {
+                        setBankDraft({ ...bankCommitted });
+                        setEditingBank(false);
+                      }}
+                    >
                       <X className="w-3.5 h-3.5" /> Cancel
                     </Button>
                   )}
-                  <Button variant="outline" size="sm" className="gap-1.5 press-effect" disabled={saving}
-                    onClick={editingBank ? handleSaveBank : () => { setBankDraft({ ...bankCommitted }); setEditingBank(true); }}>
-                    {saving && editingBank ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : editingBank ? <Save className="w-3.5 h-3.5" /> : <Edit2 className="w-3.5 h-3.5" />}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5 press-effect"
+                    disabled={saving}
+                    onClick={
+                      editingBank
+                        ? handleSaveBank
+                        : () => {
+                            setBankDraft({ ...bankCommitted });
+                            setEditingBank(true);
+                          }
+                    }
+                  >
+                    {saving && editingBank ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : editingBank ? (
+                      <Save className="w-3.5 h-3.5" />
+                    ) : (
+                      <Edit2 className="w-3.5 h-3.5" />
+                    )}
                     {editingBank ? "Save Changes" : "Edit"}
                   </Button>
                 </div>
               </div>
               <div className="grid grid-cols-3 gap-4">
-                {([
-                  { label: "Bank Name",      key: "bank_name" },
-                  { label: "Account Number", key: "account_number", mono: true },
-                  { label: "Branch",         key: "branch" },
-                  { label: "Salary (NPR)",   key: "salary",         mono: true },
-                  { label: "Contract Type",  key: "contract_type" },
-                ] as { label: string; key: keyof BankFormData; mono?: boolean }[]).map((f) => (
+                {(
+                  [
+                    { label: "Bank Name", key: "bank_name" },
+                    {
+                      label: "Account Number",
+                      key: "account_number",
+                      mono: true,
+                    },
+                    { label: "Branch", key: "branch" },
+                    { label: "Salary (NPR)", key: "salary", mono: true },
+                    { label: "Contract Type", key: "contract_type" },
+                  ] as {
+                    label: string;
+                    key: keyof BankFormData;
+                    mono?: boolean;
+                  }[]
+                ).map((f) => (
                   <div key={f.key}>
-                    <p className="text-xs text-muted-foreground mb-0.5">{f.label}</p>
-                    {editingBank
-                      ? <Input type={f.key === "salary" ? "number" : "text"} value={bankDraft[f.key]} onChange={(e) => setBankDraft((p) => ({ ...p, [f.key]: e.target.value }))} className="h-8 text-sm" />
-                      : <p className={`text-sm ${f.mono ? "font-mono-data" : ""}`}>{bankCommitted[f.key] || "—"}</p>}
+                    <p className="text-xs text-muted-foreground mb-0.5">
+                      {f.label}
+                    </p>
+                    {editingBank ? (
+                      <Input
+                        type={f.key === "salary" ? "number" : "text"}
+                        value={bankDraft[f.key]}
+                        onChange={(e) =>
+                          setBankDraft((p) => ({
+                            ...p,
+                            [f.key]: e.target.value,
+                          }))
+                        }
+                        className="h-8 text-sm"
+                      />
+                    ) : (
+                      <p
+                        className={`text-sm ${f.mono ? "font-mono-data" : ""}`}
+                      >
+                        {bankCommitted[f.key] || "—"}
+                      </p>
+                    )}
                   </div>
                 ))}
               </div>
@@ -1382,41 +2366,99 @@ export default function EmployeeSelfService() {
           <TabsContent value="department" className="space-y-4">
             <div className="bg-card border border-border rounded-lg p-5">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-semibold">Department & Role Assignment</h3>
+                <h3 className="text-sm font-semibold">
+                  Department & Role Assignment
+                </h3>
                 <div className="flex gap-2">
                   {editingDept && (
-                    <Button variant="ghost" size="sm" className="press-effect" onClick={() => { setDeptDraft({ ...deptCommitted }); setEditingDept(false); }}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="press-effect"
+                      onClick={() => {
+                        setDeptDraft({ ...deptCommitted });
+                        setEditingDept(false);
+                      }}
+                    >
                       <X className="w-3.5 h-3.5" /> Cancel
                     </Button>
                   )}
-                  <Button variant="outline" size="sm" className="gap-1.5 press-effect" disabled={saving}
-                    onClick={editingDept ? handleSaveDept : () => { setDeptDraft({ ...deptCommitted }); setEditingDept(true); }}>
-                    {saving && editingDept ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : editingDept ? <Save className="w-3.5 h-3.5" /> : <Edit2 className="w-3.5 h-3.5" />}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5 press-effect"
+                    disabled={saving}
+                    onClick={
+                      editingDept
+                        ? handleSaveDept
+                        : () => {
+                            setDeptDraft({ ...deptCommitted });
+                            setEditingDept(true);
+                          }
+                    }
+                  >
+                    {saving && editingDept ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : editingDept ? (
+                      <Save className="w-3.5 h-3.5" />
+                    ) : (
+                      <Edit2 className="w-3.5 h-3.5" />
+                    )}
                     {editingDept ? "Save Changes" : "Edit"}
                   </Button>
                 </div>
               </div>
               <div className="grid grid-cols-3 gap-4">
-                {([
-                  { label: "Department",          key: "department_name" },
-                  { label: "Designation",         key: "designation" },
-                  { label: "Level",               key: "level" },
-                  { label: "Hierarchy",           key: "hierarchy" },
-                  { label: "Date of Joining",     key: "joining_date",        mono: true },
-                  { label: "Previous Experience", key: "previous_experience" },
-                  { label: "Employment Type",     key: "employment_type" },
-                  { label: "Employment Status",   key: "employment_status" },
-                ] as { label: string; key: keyof DeptFormData; mono?: boolean }[]).map((f) => (
+                {(
+                  [
+                    { label: "Department", key: "department_name" },
+                    { label: "Designation", key: "position" },
+                    { label: "Level", key: "level" },
+                    { label: "Hierarchy", key: "hierarchy" },
+                    {
+                      label: "Date of Joining",
+                      key: "joining_date",
+                      mono: true,
+                    },
+                    {
+                      label: "Previous Experience",
+                      key: "previous_experience",
+                    },
+                    { label: "Employment Type", key: "employment_type" },
+                    { label: "Employment Status", key: "employment_status" },
+                  ] as {
+                    label: string;
+                    key: keyof DeptFormData;
+                    mono?: boolean;
+                  }[]
+                ).map((f) => (
                   <div key={f.key}>
-                    <p className="text-xs text-muted-foreground mb-0.5">{f.label}</p>
+                    <p className="text-xs text-muted-foreground mb-0.5">
+                      {f.label}
+                    </p>
                     {editingDept ? (
-                      f.key === "employment_status" ? <p className="text-sm">{empStatus}</p> : (
-                        <Input type={f.key === "joining_date" ? "date" : "text"} value={deptDraft[f.key]}
-                          onChange={(e) => setDeptDraft((p) => ({ ...p, [f.key]: e.target.value }))} className="h-8 text-sm" />
+                      f.key === "employment_status" ? (
+                        <p className="text-sm">{empStatus}</p>
+                      ) : (
+                        <Input
+                          type={f.key === "joining_date" ? "date" : "text"}
+                          value={deptDraft[f.key]}
+                          onChange={(e) =>
+                            setDeptDraft((p) => ({
+                              ...p,
+                              [f.key]: e.target.value,
+                            }))
+                          }
+                          className="h-8 text-sm"
+                        />
                       )
                     ) : (
-                      <p className={`text-sm ${f.mono ? "font-mono-data" : ""}`}>
-                        {f.key === "employment_status" ? empStatus : deptCommitted[f.key] || "—"}
+                      <p
+                        className={`text-sm ${f.mono ? "font-mono-data" : ""}`}
+                      >
+                        {f.key === "employment_status"
+                          ? empStatus
+                          : deptCommitted[f.key] || "—"}
                       </p>
                     )}
                   </div>
@@ -1431,33 +2473,97 @@ export default function EmployeeSelfService() {
               <div className="px-5 py-3 border-b border-border flex items-center justify-between">
                 <div>
                   <h3 className="text-sm font-semibold">My Assets</h3>
-                  <p className="text-xs text-muted-foreground mt-0.5">Assets allocated to you</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Assets allocated to you
+                  </p>
                 </div>
-                <Dialog open={assetRequestDialog} onOpenChange={setAssetRequestDialog}>
+                <Dialog
+                  open={assetRequestDialog}
+                  onOpenChange={setAssetRequestDialog}
+                >
                   <DialogTrigger asChild>
-                    <Button size="sm" className="gap-1.5 press-effect"><Plus className="w-3.5 h-3.5" /> Request Asset</Button>
+                    <Button size="sm" className="gap-1.5 press-effect">
+                      <Plus className="w-3.5 h-3.5" /> Request Asset
+                    </Button>
                   </DialogTrigger>
                   <DialogContent>
-                    <DialogHeader><DialogTitle>Request New Asset</DialogTitle></DialogHeader>
+                    <DialogHeader>
+                      <DialogTitle>Request New Asset</DialogTitle>
+                    </DialogHeader>
                     <div className="space-y-4 pt-2">
                       <div>
-                        <label className="text-xs text-muted-foreground mb-1 block">Asset Type</label>
-                        <Select value={assetRequest.type} onValueChange={(v) => setAssetRequest({ ...assetRequest, type: v })}>
-                          <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select type" /></SelectTrigger>
-                          <SelectContent>{["Laptop", "Monitor", "Keyboard", "Mouse", "Mobile", "Headset", "Other"].map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
+                        <label className="text-xs text-muted-foreground mb-1 block">
+                          Asset Type
+                        </label>
+                        <Select
+                          value={assetRequest.type}
+                          onValueChange={(v) =>
+                            setAssetRequest({ ...assetRequest, type: v })
+                          }
+                        >
+                          <SelectTrigger className="h-9 text-sm">
+                            <SelectValue placeholder="Select type" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {[
+                              "Laptop",
+                              "Monitor",
+                              "Keyboard",
+                              "Mouse",
+                              "Mobile",
+                              "Headset",
+                              "Other",
+                            ].map((t) => (
+                              <SelectItem key={t} value={t}>
+                                {t}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
                         </Select>
                       </div>
                       <div>
-                        <label className="text-xs text-muted-foreground mb-1 block">Asset Name</label>
-                        <Input value={assetRequest.name} onChange={(e) => setAssetRequest({ ...assetRequest, name: e.target.value })} placeholder="e.g., MacBook Pro 16 inch" className="h-9 text-sm" />
+                        <label className="text-xs text-muted-foreground mb-1 block">
+                          Asset Name
+                        </label>
+                        <Input
+                          value={assetRequest.name}
+                          onChange={(e) =>
+                            setAssetRequest({
+                              ...assetRequest,
+                              name: e.target.value,
+                            })
+                          }
+                          placeholder="e.g., MacBook Pro 16 inch"
+                          className="h-9 text-sm"
+                        />
                       </div>
                       <div>
-                        <label className="text-xs text-muted-foreground mb-1 block">Reason</label>
-                        <Textarea value={assetRequest.reason} onChange={(e) => setAssetRequest({ ...assetRequest, reason: e.target.value })} placeholder="Why do you need this asset?" className="text-sm min-h-[80px]" />
+                        <label className="text-xs text-muted-foreground mb-1 block">
+                          Reason
+                        </label>
+                        <Textarea
+                          value={assetRequest.reason}
+                          onChange={(e) =>
+                            setAssetRequest({
+                              ...assetRequest,
+                              reason: e.target.value,
+                            })
+                          }
+                          placeholder="Why do you need this asset?"
+                          className="text-sm min-h-[80px]"
+                        />
                       </div>
                       <div className="flex justify-end gap-2">
-                        <Button variant="outline" size="sm" onClick={() => setAssetRequestDialog(false)}>Cancel</Button>
-                        <Button size="sm" onClick={handleRequestAsset}>Submit Request</Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setAssetRequestDialog(false)}
+                        >
+                          Cancel
+                        </Button>
+                        <Button size="sm" onClick={handleRequestAsset}>
+                          Submit Request
+                        </Button>
                       </div>
                     </div>
                   </DialogContent>
@@ -1465,21 +2571,63 @@ export default function EmployeeSelfService() {
               </div>
               <table className="nexus-table">
                 <thead>
-                  <tr><th>Asset ID</th><th>Name</th><th>Category</th><th>Serial Number</th><th>Assigned</th><th>Status</th><th className="w-16"></th></tr>
+                  <tr>
+                    <th>Asset ID</th>
+                    <th>Name</th>
+                    <th>Category</th>
+                    <th>Serial Number</th>
+                    <th>Assigned</th>
+                    <th>Status</th>
+                    <th className="w-16"></th>
+                  </tr>
                 </thead>
                 <tbody>
                   {employeeAssets.length === 0 && (
-                    <tr><td colSpan={7} className="text-center text-sm text-muted-foreground py-6">No assets assigned yet.</td></tr>
+                    <tr>
+                      <td
+                        colSpan={7}
+                        className="text-center text-sm text-muted-foreground py-6"
+                      >
+                        No assets assigned yet.
+                      </td>
+                    </tr>
                   )}
                   {employeeAssets.map((asset, idx) => (
                     <tr key={asset.id ?? idx}>
-                      <td className="text-xs font-mono-data text-muted-foreground">{asset.asset_id}</td>
+                      <td className="text-xs font-mono-data text-muted-foreground">
+                        {asset.asset_id}
+                      </td>
                       <td className="text-sm font-medium">{asset.name}</td>
-                      <td className="text-xs text-muted-foreground">{(asset.category ?? (asset as AssetApi & { type?: string }).type) ?? "—"}</td>
-                      <td className="text-xs font-mono-data text-muted-foreground">{asset.serial_number || "—"}</td>
-                      <td className="text-xs font-mono-data text-muted-foreground">{toDateStr(asset.assigned_date) || "—"}</td>
-                      <td><span className={`status-pill ${asset.status === "assigned" ? "status-active" : "status-pending"}`}>{asset.status}</span></td>
-                      <td>{asset.status === "assigned" && <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-muted-foreground" onClick={() => handleReturnAsset(asset.id)}>Return</Button>}</td>
+                      <td className="text-xs text-muted-foreground">
+                        {asset.category ??
+                          (asset as AssetApi & { type?: string }).type ??
+                          "—"}
+                      </td>
+                      <td className="text-xs font-mono-data text-muted-foreground">
+                        {asset.serial_number || "—"}
+                      </td>
+                      <td className="text-xs font-mono-data text-muted-foreground">
+                        {toDateStr(asset.assigned_date) || "—"}
+                      </td>
+                      <td>
+                        <span
+                          className={`status-pill ${asset.status === "assigned" ? "status-active" : "status-pending"}`}
+                        >
+                          {asset.status}
+                        </span>
+                      </td>
+                      <td>
+                        {asset.status === "assigned" && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-xs text-muted-foreground"
+                            onClick={() => handleReturnAsset(asset.id)}
+                          >
+                            Return
+                          </Button>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -1492,23 +2640,45 @@ export default function EmployeeSelfService() {
             <div className="bg-card border border-border rounded-lg p-5 max-w-md">
               <h3 className="text-sm font-semibold mb-4">Change Password</h3>
               <div className="space-y-3">
-                {([
-                  { label: "Current Password",    key: "currentPassword" },
-                  { label: "New Password",         key: "newPassword" },
-                  { label: "Confirm New Password", key: "confirmPassword" },
-                ] as const).map((f) => (
+                {(
+                  [
+                    { label: "Current Password", key: "currentPassword" },
+                    { label: "New Password", key: "newPassword" },
+                    { label: "Confirm New Password", key: "confirmPassword" },
+                  ] as const
+                ).map((f) => (
                   <div key={f.key}>
-                    <p className="text-xs text-muted-foreground mb-1">{f.label}</p>
+                    <p className="text-xs text-muted-foreground mb-1">
+                      {f.label}
+                    </p>
                     <div className="relative">
                       <Input
                         type={showPasswords[f.key] ? "text" : "password"}
                         value={passwordForm[f.key]}
-                        onChange={(e) => setPasswordForm((p) => ({ ...p, [f.key]: e.target.value }))}
-                        className="h-8 text-sm pr-8" placeholder={f.label}
+                        onChange={(e) =>
+                          setPasswordForm((p) => ({
+                            ...p,
+                            [f.key]: e.target.value,
+                          }))
+                        }
+                        className="h-8 text-sm pr-8"
+                        placeholder={f.label}
                       />
-                      <button type="button" className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                        onClick={() => setShowPasswords((p) => ({ ...p, [f.key]: !p[f.key] }))}>
-                        {showPasswords[f.key] ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      <button
+                        type="button"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                        onClick={() =>
+                          setShowPasswords((p) => ({
+                            ...p,
+                            [f.key]: !p[f.key],
+                          }))
+                        }
+                      >
+                        {showPasswords[f.key] ? (
+                          <EyeOff className="w-3.5 h-3.5" />
+                        ) : (
+                          <Eye className="w-3.5 h-3.5" />
+                        )}
                       </button>
                     </div>
                   </div>
@@ -1518,8 +2688,17 @@ export default function EmployeeSelfService() {
                     <AlertCircle className="w-3.5 h-3.5" /> {passwordError}
                   </p>
                 )}
-                <Button size="sm" className="w-full gap-1.5 mt-2" disabled={changingPassword} onClick={handleChangePassword}>
-                  {changingPassword ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <KeyRound className="w-3.5 h-3.5" />}
+                <Button
+                  size="sm"
+                  className="w-full gap-1.5 mt-2"
+                  disabled={changingPassword}
+                  onClick={handleChangePassword}
+                >
+                  {changingPassword ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <KeyRound className="w-3.5 h-3.5" />
+                  )}
                   Change Password
                 </Button>
               </div>
@@ -1530,5 +2709,8 @@ export default function EmployeeSelfService() {
     </motion.div>
   );
 }
+<<<<<<< HEAD
 
 
+=======
+>>>>>>> 400241aa6a8b8221a92fa80baa059e2a4bd016cc

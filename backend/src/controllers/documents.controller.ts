@@ -6,8 +6,6 @@ import { minioClient, MINIO_BASE_URL, ensureBucket } from "@/utils/minio.js";
 const EMPLOYEE_DOCS_BUCKET = "employee-files";
 
 export class EmployeeDocumentController {
-  // ─── GET /employees/:employeeId/documents ─────────────────────────────────
-
   static async getAll(req: Request, res: Response<ApiResponse>) {
     try {
       const { employeeId } = req.params;

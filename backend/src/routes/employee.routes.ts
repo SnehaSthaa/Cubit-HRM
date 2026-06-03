@@ -15,7 +15,18 @@ router.get(
   EmployeeController.getAll,
 );
 
+<<<<<<< HEAD
 // ── GET /employees/:id ───────────────────────────────────────────────────────
+=======
+router.post(
+  "/",
+  authorize("super_admin", "hr_admin"),
+  hasRequiredPermission([EmployeesAction.Create]),
+  validate(createEmployeeSchema),
+  EmployeeController.create,
+);
+
+>>>>>>> 400241aa6a8b8221a92fa80baa059e2a4bd016cc
 router.get(
   "/:id",
   authorize("hr_admin", "super_admin", "employee"),
